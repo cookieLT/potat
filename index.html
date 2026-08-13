@@ -220,6 +220,7 @@ nav button.on{color:var(--accent)}
 "use strict";
 /* ============================ storage ============================ */
 var KEY="potat.tracker.v1", OLDKEY="violet.tracker.v1";
+var BUILD="2026-08-13 · e";      // shown in Settings so we can tell builds apart
 var BORN=new Date(2026,5,7);           // June 7, 2026
 var storageOK=true;
 try{localStorage.setItem("__t","1");localStorage.removeItem("__t");}catch(e){storageOK=false;}
@@ -265,13 +266,12 @@ function newDeviceId(){
 function newId(){return DB.did+"-"+(DB.seq++).toString(36);}
 
 var DB;
-function load(){
-  try{var raw=localStorage.getItem(KEY);
-    if(!raw){raw=localStorage.getItem(OLDKEY);   // renamed from Violet — keep anything already logged
-      if(raw)localStorage.setItem(KEY,raw);}
-    if(!raw)return defaultDB();
-    var d=JSON.parse(raw);var b=defaultDB();
-    var needsIdUpgrade=(d.idv!==2);   // must be read BEFORE defaults are merged in
+/* Brings any saved shape — old key, old id scheme, a backup pasted in from an
+   earlier build — up to what the current app expects. Used by load() AND by
+   restore, so a restored backup is never left half-formed. */
+function normalize(d){
+    var b=defaultDB();
+    var needsIdUpgrade=(d.idv!==2);   // read BEFORE defaults are merged in
     for(var k in b){if(!(k in d))d[k]=b[k];}
     // merge in any newly-shipped default types the user doesn't have
     var have={};d.types.forEach(function(t){have[t.id]=1;});
@@ -298,6 +298,13 @@ function load(){
     // until Leah sets it herself, follow the shipped default
     if(!d.settings.adultSet)d.settings.adultLb=b.settings.adultLb;
     return d;
+}
+function load(){
+  try{var raw=localStorage.getItem(KEY);
+    if(!raw){raw=localStorage.getItem(OLDKEY);   // renamed from Violet — keep anything already logged
+      if(raw)localStorage.setItem(KEY,raw);}
+    if(!raw)return defaultDB();
+    return normalize(JSON.parse(raw));
   }catch(e){return defaultDB();}
 }
 function save(){
@@ -1049,14 +1056,35 @@ function openSettings(){
         function(){prompt("Copy this:",txt);});
       else prompt("Copy this:",txt);
     };
-    var im=el("button","btn ghost","Restore");
+    var im=el("button","btn ghost","Restore by pasting text");
     im.onclick=function(){
       var txt=prompt("Paste a backup here — this replaces everything.");
       if(!txt)return;
-      try{var d=JSON.parse(txt);if(!d.events)throw 0;DB=d;save();closeSheet();renderAll();alert("Restored.");}
+      try{var d=JSON.parse(txt);if(!d.events)throw 0;
+        DB=normalize(d);save();closeSheet();renderAll();
+        alert("Restored — "+DB.events.length+" entries.");}
       catch(e){alert("That didn't look like a backup.");}
     };
-    br2.appendChild(cp);br2.appendChild(im);s.appendChild(br2);
+    br2.appendChild(cp);br2.appendChild(im);
+    // moving from the standalone file to the installed app: pasting a long
+    // backup on a phone is miserable, so offer the downloaded file first
+    var fr=el("div","row");fr.style.marginTop="8px";
+    var fl=el("label","btn ghost","📄 Restore from a backup file");
+    fl.style.textAlign="center";fl.style.flex="1";
+    var fi=el("input");fi.type="file";fi.accept=".json,application/json";fi.className="hide";
+    fi.onchange=function(){
+      var f=fi.files&&fi.files[0];if(!f)return;
+      var rd=new FileReader();
+      rd.onload=function(){
+        try{var d=JSON.parse(rd.result);if(!d.events)throw 0;
+          if(!confirm("Restore "+d.events.length+" entries?\n\nThis replaces everything currently in the app."))return;
+          DB=normalize(d);save();closeSheet();renderAll();
+          alert("Restored — "+DB.events.length+" entries.");}
+        catch(e){alert("That file didn't look like a backup.");}
+      };
+      rd.readAsText(f);
+    };
+    fl.appendChild(fi);fr.appendChild(fl);s.appendChild(fr);s.appendChild(br2);
     s.appendChild(el("div","tiny","Everything lives on this phone only — nothing is uploaded anywhere. Back up now and then, especially before changing phones or clearing browser data."));
     if(!storageOK)s.appendChild(el("div","tiny","⚠️ Saving is currently blocked. That usually means the file was opened straight from Downloads. Open it in Chrome from a bookmark instead, and keep a backup."));
 
@@ -1064,7 +1092,7 @@ function openSettings(){
     wipe.onclick=function(){if(confirm("Erase everything? This cannot be undone.")&&confirm("Really erase?")){
       DB=defaultDB();save();closeSheet();renderAll();}};
     s.appendChild(wipe);
-    s.appendChild(el("div","tiny","Po Tat (葡撻) · born June 7, 2026 · "+DB.events.length+" entries logged"));
+    s.appendChild(el("div","tiny","Po Tat (葡撻) · born June 7, 2026 · "+DB.events.length+" entries logged · build "+BUILD));
   });
 }
 function toCSV(){
