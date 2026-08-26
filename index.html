@@ -117,6 +117,14 @@ main{padding:12px 14px 132px;max-width:560px;margin:0 auto}
 .cross .ck{font-size:11.5px;color:var(--muted);font-weight:600;letter-spacing:.02em}
 .cross .cv{font-size:17px;font-weight:700;margin-top:2px}
 .cross .cs{font-size:12.5px;color:var(--ink2);margin-top:3px;line-height:1.45}
+.bar{height:7px;border-radius:99px;background:var(--surf2);margin:10px 0 9px;overflow:hidden}
+.barf{height:100%;background:var(--accent);border-radius:99px;transition:width .25s ease}
+.rep{font-size:10.5px;font-weight:700;color:var(--accent);letter-spacing:.03em;text-transform:uppercase}
+.emcard{border-color:var(--crit);box-shadow:0 0 0 1px var(--crit) inset}
+.emh{font-size:17px;font-weight:700;color:var(--crit);letter-spacing:-.01em}
+.emb{font-size:13.5px;color:var(--ink2);margin-top:5px;line-height:1.5}
+a.tel{display:block;margin-top:11px;text-decoration:none;background:var(--crit);color:#fff;
+  border-radius:12px;padding:12px;text-align:center;font-weight:700;font-size:15px}
 .segs{display:flex;gap:5px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
 .segs::-webkit-scrollbar{display:none}
 
@@ -198,19 +206,21 @@ nav button.on{color:var(--accent)}
 </header>
 
 <main>
-  <section id="v-log"></section>
+  <section id="v-care"></section>
+  <section id="v-soc" class="hide"></section>
+  <section id="v-rec" class="hide"></section>
+  <section id="v-log" class="hide"></section>
   <section id="v-today" class="hide"></section>
   <section id="v-hist" class="hide"></section>
-  <section id="v-violet" class="hide"></section>
 </main>
 
 <div id="quick"></div>
 
 <nav>
-  <button data-tab="log" class="on"><span class="ne">🐾</span>Log</button>
-  <button data-tab="today"><span class="ne">📋</span>Today</button>
-  <button data-tab="hist"><span class="ne">📊</span>History</button>
-  <button data-tab="violet"><span class="ne">📈</span>Po Tat</button>
+  <button data-tab="care" class="on"><span class="ne">📅</span>Care</button>
+  <button data-tab="soc"><span class="ne">✅</span>Socialize</button>
+  <button data-tab="rec"><span class="ne">📇</span>Records</button>
+  <button data-tab="log"><span class="ne">🐾</span>Log</button>
 </nav>
 
 <div id="scrim" class="hide"></div>
@@ -220,7 +230,7 @@ nav button.on{color:var(--accent)}
 "use strict";
 /* ============================ storage ============================ */
 var KEY="potat.tracker.v1", OLDKEY="violet.tracker.v1";
-var BUILD="2026-08-13 · e";      // shown in Settings so we can tell builds apart
+var BUILD="2026-08-26 · f";      // shown in Settings so we can tell builds apart
 var BORN=new Date(2026,5,7);           // June 7, 2026
 var storageOK=true;
 try{localStorage.setItem("__t","1");localStorage.removeItem("__t");}catch(e){storageOK=false;}
@@ -244,16 +254,58 @@ var DEFAULT_TYPES=[
 ];
 
 var DEFAULT_MILES=[
+ {id:"m7",d:"2026-08-30",t:"DHPP booster (12 wks)",s:"Typical schedule — confirm the date with your vet"},
  {id:"m1",d:"2026-09-27",t:"Socialization window closes (16 wks)",s:"Irreversible — audit before, not after"},
+ {id:"m8",d:"2026-09-27",t:"DHPP booster (16 wks)",s:"Typical schedule — confirm the date with your vet"},
  {id:"m2",d:"2026-10-07",t:"Rabies vaccine due (4 months)",s:"Required by Arkansas law"},
  {id:"m3",d:"2026-11-07",t:"Check she still fits the Vari 28\" standing",s:"~4–5 months"},
  {id:"m4",d:"2027-03-07",t:"Car harness at ~18 lb — measure ribcage",s:"Clickit Sport Plus, 16.5–22\""},
- {id:"m5",d:"2027-06-07",t:"Contact the breeder (annual)",s:"Contract requires once per calendar year"},
- {id:"m6",d:"2028-06-07",t:"Spay deadline",s:"Per purchase contract"}
+ {id:"m6",d:"2028-06-07",t:"Spay deadline",s:"Per purchase contract"},
+ /* repeating — ticking one moves it to the next occurrence instead of finishing it */
+ {id:"r1",d:"2026-08-16",t:"Weigh her",s:"Weekly is plenty",rep:"week"},
+ {id:"r2",d:"2026-09-07",t:"Heartworm + flea/tick preventative",s:"Confirm product and start date with your vet",rep:"month"},
+ {id:"m5",d:"2027-06-07",t:"Contact the breeder",s:"Contract requires once per calendar year",rep:"year"}
+];
+
+/* Socialization — the window shuts around 16 weeks and does not reopen.
+   Quality over quantity: she should notice it, get paid for it, and stay
+   under threshold. A frightening experience counts backwards. */
+var SOC_DUE="2026-09-27";
+var DEFAULT_SOC=[
+ {g:"People",o:[
+   ["s-p1","A man with a beard or deep voice"],["s-p2","Someone in a hat or hood"],
+   ["s-p3","Children (calm, supervised)"],["s-p4","An older person, slow-moving"],
+   ["s-p5","Someone with a cane, walker or wheelchair"],["s-p6","Hi-vis, uniform or work gear"],
+   ["s-p7","Someone carrying or opening an umbrella"]]},
+ {g:"Surfaces",o:[
+   ["s-s1","Grass"],["s-s2","Gravel or mulch"],["s-s3","Tile or lino"],
+   ["s-s4","Metal grate or manhole cover"],["s-s5","Something wobbly or springy"],
+   ["s-s6","Wet ground after rain"],["s-s7","Stairs — carried, just to see them"]]},
+ {g:"Sounds",o:[
+   ["s-n1","Vacuum (across the room first)"],["s-n2","Doorbell or knock"],
+   ["s-n3","Hairdryer"],["s-n4","Kitchen clatter, pans, blender"],
+   ["s-n5","Thunder or fireworks, played quietly"],["s-n6","Traffic from a safe distance"]]},
+ {g:"Handling",o:[
+   ["s-h1","Paws held, nails touched with clippers"],["s-h2","Ears looked in"],
+   ["s-h3","Mouth opened, teeth touched"],["s-h4","Tail and hindquarters"],
+   ["s-h5","Collar taken hold of, then released and paid"],["s-h6","Brushed all over"],
+   ["s-h7","Towel-dried"],["s-h8","Lifted correctly — chest and hindquarters, spine level"]]},
+ {g:"Places",o:[
+   ["s-l1","Car ride, crated, somewhere pleasant"],["s-l2","Vet visit with no procedure — treats and out"],
+   ["s-l3","Pet store floor (once fully vaccinated)"],["s-l4","Driveway and sidewalk"],
+   ["s-l5","Somebody else's house"],["s-l6","Being left with someone who isn't you"]]},
+ {g:"Animals",o:[
+   ["s-a1","Cat one, through a barrier"],["s-a2","Cat two, through a barrier"],
+   ["s-a3","Cat three, through a barrier"],["s-a4","Loose in a room with a cat, dragging a leash"],
+   ["s-a5","A calm, vaccinated adult dog"],["s-a6","Dogs seen at a distance without reacting"]]},
+ {g:"Being alone",o:[
+   ["s-b1","Crate, door shut, five minutes"],["s-b2","Alone in a room for fifteen"],
+   ["s-b3","Alone in the house for thirty"],["s-b4","Alone for an hour"]]}
 ];
 
 function defaultDB(){return{v:1,events:[],weights:[],types:JSON.parse(JSON.stringify(DEFAULT_TYPES)),
   miles:JSON.parse(JSON.stringify(DEFAULT_MILES)),done:{},
+  rec:{chip:"",chipReg:"",vet:"",vetTel:"",er:"",erTel:"",ins:"",insNo:"",breeder:"",breederTel:"",vax:[],notes:""},
   settings:{theme:"auto",unit:"lb",adultLb:20,adultSet:false,meals:3},
   seq:1,did:newDeviceId(),idv:2};}
 
@@ -295,6 +347,11 @@ function normalize(d){
     }
     d.weights.forEach(function(w,k){if(!w.id)w.id=d.did+"-w"+k+"-"+w.ts;});
     for(var sk in b.settings){if(!(sk in d.settings))d.settings[sk]=b.settings[sk];}
+    if(!d.rec)d.rec=b.rec;
+    for(var rk in b.rec){if(!(rk in d.rec))d.rec[rk]=b.rec[rk];}
+    // ship any new default milestones the user hasn't got (repeating ones especially)
+    var mh={};d.miles.forEach(function(m){mh[m.id]=1;});
+    DEFAULT_MILES.forEach(function(m){if(!mh[m.id])d.miles.push(JSON.parse(JSON.stringify(m)));});
     // until Leah sets it herself, follow the shipped default
     if(!d.settings.adultSet)d.settings.adultLb=b.settings.adultLb;
     return d;
@@ -505,7 +562,7 @@ function editNote(i){
 
 /* ============================ render: log ============================ */
 function renderLog(){
-  var v=$("#v-log");v.innerHTML="";
+  var v=$("#v-log");v.innerHTML="";v.appendChild(logSegs());
   var live=DB.events.filter(function(e){return e.end===null;});
   live.forEach(function(ev){
     var t=typeOf(ev.t);
@@ -556,6 +613,22 @@ function todayEvents(){var k=dayKey(Date.now());
 function sleepMs(evs,now){var s=0;evs.forEach(function(e){if(e.t==="sleep")s+=dur(e,now);});return s;}
 function renderStats(){
   var s=$("#stats");s.innerHTML="";
+  $("#age").textContent=ageText();
+  /* Outside the Log tab, a row of zeroes just reads as "you are behind".
+     Show what is actually coming up instead. */
+  if(TAB!=="log"){
+    var up=nextDue();
+    if(up){
+      var d=el("div","pill"+(up.days<=7?" alert":""));
+      d.innerHTML="📅 "+up.m.t+" · <b>"+(up.days<0?Math.abs(up.days)+"d overdue":
+        up.days===0?"today":"in "+up.days+"d")+"</b>";
+      s.appendChild(d);
+    }
+    var ws=DB.weights.slice().sort(function(a,b){return a.ts-b.ts;});
+    if(ws.length){var w=el("div","pill");
+      w.innerHTML="⚖️ <b>"+ws[ws.length-1].w.toFixed(1)+" lb</b>";s.appendChild(w);}
+    return;
+  }
   var evs=todayEvents(),now=Date.now();
   function count(id){return evs.filter(function(e){return e.t===id;}).length;}
   var lp=lastOf("pee");
@@ -566,7 +639,17 @@ function renderStats(){
   a.forEach(function(x){var e=el("div","pill");e.innerHTML=x[0]+" <b>"+x[1]+"</b>";s.appendChild(e);});
   var sm=sleepMs(evs,now);
   var sp=el("div","pill");sp.innerHTML="😴 <b>"+fmtDur(sm)+"</b>";s.appendChild(sp);
-  $("#age").textContent=ageText();
+}
+/* soonest unfinished dated item, overdue ones first */
+function nextDue(){
+  var today=new Date();today.setHours(0,0,0,0);
+  var best=null;
+  DB.miles.forEach(function(m){
+    if(!m.rep&&DB.done[m.id])return;
+    var days=Math.round((keyToDate(m.d)-today)/86400000);
+    if(!best||days<best.days)best={m:m,days:days};
+  });
+  return best;
 }
 
 /* ============================ render: today ============================ */
@@ -589,7 +672,7 @@ function evRow(ev,showDate){
   return r;
 }
 function renderToday(){
-  var v=$("#v-today");v.innerHTML="";
+  var v=$("#v-today");v.innerHTML="";v.appendChild(logSegs());
   var evs=todayEvents(),now=Date.now();
   var d=new Date();
   v.appendChild(el("div","sec",d.toLocaleDateString(undefined,{weekday:"long",month:"short",day:"numeric"})));
@@ -621,7 +704,7 @@ function stat(k,val,sub){
 /* ============================ render: history ============================ */
 var HRANGE=7, HTYPE="pee", HOPEN=null;
 function renderHist(){
-  var v=$("#v-hist");v.innerHTML="";
+  var v=$("#v-hist");v.innerHTML="";v.appendChild(logSegs());
   // range picker
   var segs=el("div","segs");
   [7,14,30].forEach(function(n){
@@ -770,8 +853,8 @@ function shade(v,max){
 }
 
 /* ============================ render: violet ============================ */
-function renderViolet(){
-  var v=$("#v-violet");v.innerHTML="";
+function renderCare(){
+  var v=$("#v-care");v.innerHTML="";
   v.appendChild(el("div","sec","Food today"));
   v.appendChild(feedCard());
   v.appendChild(el("div","sec","Weight"));
@@ -792,18 +875,29 @@ function renderViolet(){
   }else card.appendChild(el("div","empty","No weights yet. Log one below — weekly is plenty."));
   var wr=el("div","row");wr.style.marginTop="10px";
   var inp=el("input");inp.type="number";inp.step="0.1";inp.placeholder="lb";inp.inputMode="decimal";
-  var add=el("button","btn","Add weight");add.style.flex="0 0 auto";
+  var wd=el("input");wd.type="date";wd.value=dayKey(Date.now());wd.style.flex="0 0 auto";
+  var add=el("button","btn","Add");add.style.flex="0 0 auto";
   add.onclick=function(){
     var w=parseFloat(inp.value);if(!(w>0))return;
-    DB.weights.push({id:newId(),ts:Date.now(),w:w});save();inp.value="";vibe(12);renderViolet();
+    var when=Date.now();
+    if(wd.value&&/^\d{4}-\d{2}-\d{2}$/.test(wd.value)){
+      var dt=keyToDate(wd.value);dt.setHours(12,0,0,0);   // midday, so it can't slip a day
+      when=dt.getTime();
+    }
+    DB.weights.push({id:newId(),ts:when,w:w});save();inp.value="";vibe(12);renderCare();
   };
-  wr.appendChild(inp);wr.appendChild(add);card.appendChild(wr);
+  // three controls will not fit across a phone — weight and date share a row,
+  // the button gets its own
+  inp.style.flex="1 1 90px";wd.style.flex="1 1 130px";wd.style.minWidth="0";
+  wr.appendChild(inp);wr.appendChild(wd);card.appendChild(wr);
+  var wr2=el("div","row");wr2.style.marginTop="8px";
+  add.style.flex="1";wr2.appendChild(add);card.appendChild(wr2);
   if(ws.length){
     var lst=el("div","tiny","Tap a reading to delete: ");
     ws.slice().reverse().slice(0,12).forEach(function(w){
       var b=el("button","chip mini",w.w.toFixed(1)+" lb · "+new Date(w.ts).toLocaleDateString(undefined,{month:"short",day:"numeric"}));
       b.style.margin="3px 3px 0 0";
-      b.onclick=function(){if(confirm("Delete "+w.w+" lb?")){DB.weights=DB.weights.filter(function(x){return x.id!==w.id;});save();renderViolet();}};
+      b.onclick=function(){if(confirm("Delete "+w.w+" lb?")){DB.weights=DB.weights.filter(function(x){return x.id!==w.id;});save();renderCare();}};
       lst.appendChild(b);
     });
     card.appendChild(lst);
@@ -818,29 +912,188 @@ function renderViolet(){
     var done=!!DB.done[m.id];
     var row=el("div","mile"+(done?" done":""));
     var ck=el("button","ck"+(done?" on":""),done?"✓":"");
-    ck.onclick=function(){DB.done[m.id]=!done;save();renderViolet();vibe(10);};
+    ck.onclick=function(){
+      if(m.rep){ tickRepeat(m); }               // repeating: roll forward, never "finished"
+      else DB.done[m.id]=!done;
+      save();renderCare();vibe(10);
+    };
     row.appendChild(ck);
     var mid=el("div");mid.style.flex="1";
-    mid.appendChild(el("div","mt",m.t));
+    var ttl=el("div","mt",m.t);
+    if(m.rep){var tag=el("span","rep"," "+({week:"weekly",month:"monthly",year:"yearly"}[m.rep]||m.rep));
+      ttl.appendChild(tag);}
+    mid.appendChild(ttl);
     var dd=keyToDate(m.d),diff=Math.round((dd-now)/86400000);
     var when=dd.toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"});
     var rel=done?"done":diff<0?Math.abs(diff)+" days overdue":diff===0?"today":"in "+diff+" days";
-    var sub=el("div","ms",when+" · "+rel+(m.s?" — "+m.s:""));
+    var extra=m.rep&&m.last?" — last done "+keyToDate(m.last).toLocaleDateString(undefined,{month:"short",day:"numeric"}):(m.s?" — "+m.s:"");
+    var sub=el("div","ms",when+" · "+rel+extra);
     if(!done&&diff<14)sub.style.color=diff<0?"var(--crit)":"var(--warn)";
     mid.appendChild(sub);row.appendChild(mid);
     if(m.custom){var x=el("button","mv","✕");x.onclick=function(){
-      DB.miles=DB.miles.filter(function(z){return z.id!==m.id;});save();renderViolet();};row.appendChild(x);}
+      DB.miles=DB.miles.filter(function(z){return z.id!==m.id;});save();renderCare();};row.appendChild(x);}
     mc.appendChild(row);
   });
   v.appendChild(mc);
-  var addm=el("button","btn ghost","+ Add milestone");
+  var addm=el("button","btn ghost","+ Add a date");
   addm.onclick=function(){
-    var t=prompt("Milestone");if(!t)return;
+    var t=prompt("What is it?");if(!t)return;
     var d=prompt("Date (YYYY-MM-DD)","2026-");if(!d||!/^\d{4}-\d{2}-\d{2}$/.test(d))return;
-    DB.miles.push({id:newId(),d:d,t:t,s:"",custom:true});save();renderViolet();
+    var r=prompt("Repeat? Type week, month or year — or leave blank for a one-off","");
+    r=(r||"").trim().toLowerCase();
+    if(["week","month","year"].indexOf(r)<0)r="";
+    DB.miles.push({id:newId(),d:d,t:t,s:"",custom:true,rep:r||undefined});save();renderCare();
   };
   v.appendChild(addm);
+  v.appendChild(el("div","tiny","Repeating items roll forward to the next one when you tick them, so they never read as finished."));
 }
+/* Ticking a repeating item records today and moves it to the next occurrence.
+   If it is badly overdue it still lands in the future, not in the past. */
+function tickRepeat(m){
+  var today=new Date();today.setHours(0,0,0,0);
+  m.last=dayKey(today.getTime());
+  var next=keyToDate(m.d);
+  if(next<today)next=new Date(today.getTime());
+  var guard=0;
+  do{
+    if(m.rep==="week")next.setDate(next.getDate()+7);
+    else if(m.rep==="month")next.setMonth(next.getMonth()+1);
+    else next.setFullYear(next.getFullYear()+1);
+    guard++;
+  }while(next<=today&&guard<400);
+  m.d=dayKey(next.getTime());
+  DB.done[m.id]=false;
+}
+/* ============================ render: socialize ============================ */
+function renderSoc(){
+  var v=$("#v-soc");v.innerHTML="";
+  var due=keyToDate(SOC_DUE),today=new Date();today.setHours(0,0,0,0);
+  var left=Math.round((due-today)/86400000);
+  var total=0,done=0;
+  DEFAULT_SOC.forEach(function(g){g.o.forEach(function(o){total++;if(DB.done[o[0]])done++;});});
+
+  var head=el("div","card");
+  head.appendChild(el("div","feedbig",done+" of "+total));
+  head.appendChild(el("div","feedsub",left>0?left+" days until the window closes":
+    left===0?"the window closes today":"the window closed "+Math.abs(left)+" days ago"));
+  var bar=el("div","bar");var fill=el("div","barf");
+  fill.style.width=(total?Math.round(100*done/total):0)+"%";
+  bar.appendChild(fill);head.appendChild(bar);
+  head.appendChild(el("div","tiny","Around 16 weeks this shuts and does not reopen — "+
+    due.toLocaleDateString(undefined,{month:"long",day:"numeric"})+". Quality beats quantity: she should "+
+    "notice the thing, get paid for it, and stay under threshold. Something that frightens her counts backwards, "+
+    "so go at her pace and stop while she is still enjoying it."));
+  if(left<=21&&left>0)head.style.borderColor="var(--warn)";
+  v.appendChild(head);
+
+  DEFAULT_SOC.forEach(function(g){
+    var gd=g.o.filter(function(o){return DB.done[o[0]];}).length;
+    v.appendChild(el("div","sec",g.g+"  ·  "+gd+"/"+g.o.length));
+    var c=el("div","card");c.style.padding="2px 0";
+    g.o.forEach(function(o){
+      var on=!!DB.done[o[0]];
+      var row=el("div","mile"+(on?" done":""));
+      var ck=el("button","ck"+(on?" on":""),on?"✓":"");
+      ck.onclick=function(){DB.done[o[0]]=!on;save();renderSoc();vibe(10);};
+      row.appendChild(ck);
+      var mid=el("div");mid.style.flex="1";
+      mid.appendChild(el("div","mt",o[1]));
+      row.appendChild(mid);
+      c.appendChild(row);
+    });
+    v.appendChild(c);
+  });
+  v.appendChild(el("div","tiny","Before she is fully vaccinated, carry her or use a clean surface you control — "+
+    "the risk of missing this window is generally considered greater than the risk of careful outings, but that "+
+    "trade-off is worth one conversation with your vet."));
+}
+
+/* ============================ render: records ============================ */
+function renderRec(){
+  var v=$("#v-rec");v.innerHTML="";
+  var R=DB.rec;
+
+  // --- the one that matters at 2am ---
+  var em=el("div","card emcard");
+  em.appendChild(el("div","emh","If her back legs go weak or wobbly — go now"));
+  em.appendChild(el("div","emb","Po Tat carries one copy of CDDY, so a disc event is a real possibility and it is "+
+    "measured in hours, not days. Sudden hind-limb weakness, dragging, crying when lifted, or refusing to stand "+
+    "is a surgical emergency. Do not wait for morning."));
+  if(R.erTel){
+    var a=el("a","btn tel","📞 "+(R.er||"Emergency vet")+" — "+R.erTel);
+    a.href="tel:"+R.erTel.replace(/[^0-9+]/g,"");em.appendChild(a);
+  }else em.appendChild(el("div","tiny","Add your after-hours vet below and it becomes a tap-to-call button here."));
+  v.appendChild(em);
+
+  v.appendChild(el("div","sec","Her spine — the standing rules"));
+  var sp=el("div","card");
+  [["Harness only for walking","A collar is for ID tags. Never clip a leash to her neck."],
+   ["Never tether her by the neck in a car","Crate or a crash-tested harness."],
+   ["No jumping on or off furniture, ever","Ramps or steps instead — the landing is what does the damage."],
+   ["Lift her properly","One hand under the chest, one under the hindquarters, spine level. In and out of the car too."],
+   ["Keep her lean","Also a contract obligation. Ribs easily felt, not seen."],
+   ["No forced exercise or jumping above shoulder height before 18 months","Contract §6.b. Swimming and brain games instead of distance running."]
+  ].forEach(function(r){
+    var row=el("div","mile");
+    var mid=el("div");mid.style.flex="1";
+    mid.appendChild(el("div","mt",r[0]));
+    mid.appendChild(el("div","ms",r[1]));
+    row.appendChild(mid);sp.appendChild(row);
+  });
+  sp.appendChild(el("div","tiny","Degeneration is near-certain with CDDY; a clinical disc event is not — penetrance "+
+    "is incomplete and many carriers never show signs. These rules are what shifts the odds."));
+  v.appendChild(sp);
+
+  // --- vaccinations ---
+  v.appendChild(el("div","sec","Vaccinations and treatments"));
+  var vc=el("div","card");
+  if(!R.vax.length)vc.appendChild(el("div","empty","Nothing recorded yet."));
+  else R.vax.slice().sort(function(a,b){return a.d<b.d?1:-1;}).forEach(function(x){
+    var row=el("div","mile");
+    var mid=el("div");mid.style.flex="1";
+    mid.appendChild(el("div","mt",x.t));
+    mid.appendChild(el("div","ms",keyToDate(x.d).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"})+
+      (x.n?" · "+x.n:"")));
+    row.appendChild(mid);
+    var del=el("button","mv","✕");del.onclick=function(){
+      if(confirm("Remove "+x.t+"?")){R.vax=R.vax.filter(function(z){return z.id!==x.id;});save();renderRec();}};
+    row.appendChild(del);
+    vc.appendChild(row);
+  });
+  v.appendChild(vc);
+  var av=el("button","btn ghost","+ Record one");
+  av.onclick=function(){
+    var t=prompt("What was given? (e.g. DHPP #2, Rabies, Dewormer)");if(!t)return;
+    var d=prompt("Date (YYYY-MM-DD)",dayKey(Date.now()));
+    if(!d||!/^\d{4}-\d{2}-\d{2}$/.test(d))return;
+    var n=prompt("Anything to note? (vet, batch, reaction)","")||"";
+    R.vax.push({id:newId(),t:t,d:d,n:n});save();renderRec();
+  };
+  v.appendChild(av);
+
+  // --- the details you need when someone asks ---
+  v.appendChild(el("div","sec","Details"));
+  var dc=el("div","card");
+  [["Microchip number","chip"],["Chip registry","chipReg"],
+   ["Vet","vet"],["Vet phone","vetTel"],
+   ["After-hours / emergency vet","er"],["Emergency phone","erTel"],
+   ["Insurance","ins"],["Policy number","insNo"],
+   ["Breeder","breeder"],["Breeder phone","breederTel"]].forEach(function(f){
+    dc.appendChild(el("div","lbl",f[0]));
+    var i=el("input");i.type=f[1].indexOf("Tel")>0?"tel":"text";
+    i.value=R[f[1]]||"";
+    i.onchange=function(){R[f[1]]=i.value.trim();save();};
+    dc.appendChild(i);
+  });
+  dc.appendChild(el("div","lbl","Anything else"));
+  var ta=el("textarea");ta.value=R.notes||"";
+  ta.onchange=function(){R.notes=ta.value;save();};
+  dc.appendChild(ta);
+  v.appendChild(dc);
+  v.appendChild(el("div","tiny","Stored on this phone only, like everything else here. Include it in a backup "+
+    "and it travels with the rest."));
+}
+
 function feedCard(){
   var c=el("div","card"),b=feedBracket(),adult=DB.settings.adultLb||25,meals=DB.settings.meals||3;
   if(!b){
@@ -876,13 +1129,13 @@ function feedCard(){
   eb.onclick=function(){
     var x=prompt("Expected adult weight in pounds\n\nThis is what she'll weigh grown, not now — it's what the Fromm chart is keyed to.",adult);
     if(x===null)return;x=parseFloat(x);if(!(x>0))return;
-    DB.settings.adultLb=x;DB.settings.adultSet=true;save();renderViolet();
+    DB.settings.adultLb=x;DB.settings.adultSet=true;save();renderCare();
   };
   var mb=el("button","chip mini","Meals: "+meals+"/day");
   mb.onclick=function(){
     var x=prompt("How many meals a day?",meals);
     if(x===null)return;x=parseInt(x,10);if(!(x>0&&x<9))return;
-    DB.settings.meals=x;save();renderViolet();
+    DB.settings.meals=x;save();renderCare();
   };
   row.appendChild(eb);row.appendChild(mb);c.appendChild(row);
   var exact=false;b.rows.forEach(function(r){if(r[0]===adult)exact=true;});
@@ -1123,20 +1376,38 @@ function applyTheme(){
 }
 
 /* ============================ shell ============================ */
-var TAB="log";
+var TAB="care", LOGSUB="log";
 function renderAll(){
   renderStats();
-  if(TAB==="log")renderLog();
-  else if(TAB==="today")renderToday();
-  else if(TAB==="hist")renderHist();
-  else renderViolet();
+  if(TAB==="care")renderCare();
+  else if(TAB==="soc")renderSoc();
+  else if(TAB==="rec")renderRec();
+  else if(LOGSUB==="today")renderToday();
+  else if(LOGSUB==="hist")renderHist();
+  else renderLog();
+}
+/* the three logging views live behind one tab now */
+function showLogSub(){
+  ["log","today","hist"].forEach(function(t){
+    $("#v-"+t).classList.toggle("hide",!(TAB==="log"&&LOGSUB===t));});
+}
+function logSegs(){
+  var segs=el("div","segs");
+  [["log","Log"],["today","Today"],["hist","History"]].forEach(function(p){
+    var b=el("button","chip"+(LOGSUB===p[0]?" on":""),p[1]);
+    b.onclick=function(){LOGSUB=p[0];showLogSub();renderAll();window.scrollTo(0,0);};
+    segs.appendChild(b);
+  });
+  segs.style.marginBottom="10px";
+  return segs;
 }
 document.querySelectorAll("nav button").forEach(function(b){
   b.onclick=function(){
     TAB=b.dataset.tab;
     document.querySelectorAll("nav button").forEach(function(x){x.classList.toggle("on",x===b);});
-    ["log","today","hist","violet"].forEach(function(t){
+    ["care","soc","rec"].forEach(function(t){
       $("#v-"+t).classList.toggle("hide",t!==TAB);});
+    showLogSub();
     renderAll();window.scrollTo(0,0);
   };
 });
@@ -1146,7 +1417,7 @@ setInterval(function(){
   document.querySelectorAll("[data-live]").forEach(function(n){
     var ev=evById(n.dataset.live);if(ev)n.textContent=fmtDur(dur(ev));
   });
-  if(TAB==="log"||TAB==="today"){renderStats();}
+  if(TAB==="log"){renderStats();}
 },30000);
 
 document.addEventListener("visibilitychange",function(){if(!document.hidden)renderAll();});
