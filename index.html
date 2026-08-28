@@ -117,6 +117,7 @@ main{padding:12px 14px 132px;max-width:560px;margin:0 auto}
 .cross .ck{font-size:11.5px;color:var(--muted);font-weight:600;letter-spacing:.02em}
 .cross .cv{font-size:17px;font-weight:700;margin-top:2px}
 .cross .cs{font-size:12.5px;color:var(--ink2);margin-top:3px;line-height:1.45}
+.tm2.cont{color:var(--line);font-size:15px;text-align:right;padding-right:4px}
 .tm2{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;color:var(--muted);
   min-width:62px;padding-top:3px;font-variant-numeric:tabular-nums}
 .tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
@@ -248,7 +249,7 @@ nav button.on{color:var(--accent)}
 "use strict";
 /* ============================ storage ============================ */
 var KEY="potat.tracker.v1", OLDKEY="violet.tracker.v1";
-var BUILD="2026-08-28 · g";      // shown in Settings so we can tell builds apart
+var BUILD="2026-08-28 · h";      // shown in Settings so we can tell builds apart
 var BORN=new Date(2026,5,7);           // June 7, 2026
 var storageOK=true;
 try{localStorage.setItem("__t","1");localStorage.removeItem("__t");}catch(e){storageOK=false;}
@@ -498,7 +499,7 @@ function buildDay(a){
     slots.push(t);
     S.push({t:t,k:"free",lbl:"Free time",note:n<2?
       "Cat session goes in this block — short, her on a leash, cats free to leave.":
-      "Supervised. Let it run longer if she is settled and you are watching."});
+      "Supervised. Let it run longer if she is settled and you are watching.",cyc:t});
     S.push({t:t+C.free,k:"out",lbl:"Outside",note:"Then into the pen."});
     S.push({t:t+C.free+C.out,k:"nap",lbl:"Nap",note:rdur(C.nap)+" — this is sleep, not a time-out."});
     t+=cyc; n++;
@@ -553,7 +554,8 @@ function buildDay(a){
     note:"Small — or warm goat milk. §12 keeps this; the loop spec dropped it. It is what bridges the overnight gap."});
   S.push({t:close-15,k:"out",lbl:"Final trip outside",note:"Give her the full ten minutes. Grooming before this, not after."});
   S.push({t:close,k:"bed",lbl:"Tray in, pen closes",note:"Her bedtime is fixed whether or not you are still up."});
-  S.sort(function(x,y){return x.t-y.t || (x.k==="out"?-1:1);});
+  var RANK={out:0,meal:1,free:2,nap:3,pen:4,bed:5};
+  S.sort(function(x,y){return (x.t-y.t) || (RANK[x.k]-RANK[y.k]);});
 
   var lastMeal=meals[meals.length-1];
   var lastFeed=a.snack?close-45:lastMeal;
@@ -1203,10 +1205,15 @@ function renderDay(){
   v.appendChild(el("div","sec","The day"));
   var tl=el("div","tl");
   var d=new Date(),now=d.getHours()*60+d.getMinutes();
+  var prevT=null;
   out.steps.forEach(function(x){
     var r=el("div","ev");
     if(x.t%1440<=now)r.style.opacity=".45";
-    r.appendChild(el("div","tm2",rfmt(x.t)));
+    var same=(x.t===prevT);
+    var tc=el("div","tm2"+(same?" cont":""),same?"↳":rfmt(x.t));
+    r.appendChild(tc);
+    if(same)r.style.borderTop="0";
+    prevT=x.t;
     var mid=el("div","mid");
     var tag=el("span","tag k-"+x.k,x.lbl);
     mid.appendChild(tag);
