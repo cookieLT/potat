@@ -252,7 +252,7 @@ nav button.on{color:var(--accent)}
 "use strict";
 /* ============================ storage ============================ */
 var KEY="potat.tracker.v1", OLDKEY="violet.tracker.v1";
-var BUILD="2026-08-28 · j";      // shown in Settings so we can tell builds apart
+var BUILD="2026-08-28 · n";      // shown in Settings so we can tell builds apart
 var BORN=new Date(2026,5,7);           // June 7, 2026
 var storageOK=true;
 try{localStorage.setItem("__t","1");localStorage.removeItem("__t");}catch(e){storageOK=false;}
@@ -326,7 +326,7 @@ var DEFAULT_SOC=[
 ];
 
 var ROUTINE_DEF={
-  dayStart:"11:00", dayCap:"12:30", loopStart:"", penClose:"23:30",
+  dayStart:"11:00", dayCap:"12:30", loopStart:"", loopDay:"", penClose:"23:30",
   cycle:{free:60,out:5,nap:85},          // 150 minutes, one turn of the loop
   meals:4, snack:true,                   // §12: small snack or warm goat milk before the crate
   out:{on:false, start:"14:00", mins:120, withHer:true},   // an errand or an outing
@@ -386,7 +386,7 @@ function normalize(d){
     // ship any new default milestones the user hasn't got (repeating ones especially)
     var mh={};d.miles.forEach(function(m){mh[m.id]=1;});
     DEFAULT_MILES.forEach(function(m){if(!mh[m.id])d.miles.push(JSON.parse(JSON.stringify(m)));});
-    // until Leah sets it herself, follow the shipped default
+    // until the owner sets it herself, follow the shipped default
     if(!d.settings.adultSet)d.settings.adultLb=b.settings.adultLb;
     return d;
 }
@@ -468,7 +468,7 @@ function fmtShort(ms){                       // seconds matter here; fmtDur roun
 
      dayStart  — her first potty and first meal. Tied to HER morning.
                  Capped: it must not drift with whoever is still asleep.
-     loopStart — when supervised free time can begin. Tied to Leah's morning.
+     loopStart — when supervised free time can begin. Tied to the owner's morning.
 
    On a weekday they are the same time and nothing changes. On a weekend
    dayStart holds while loopStart slides, and she is fed and emptied in
@@ -527,7 +527,8 @@ function buildDay(a){
       "Cat session goes in this block — short, her on a leash, cats free to leave.":
       "Supervised. Let it run longer if she is settled and you are watching.",cyc:t});
     S.push({t:t+C.free,k:"out",lbl:"Outside",note:"Then into the pen."});
-    S.push({t:t+C.free+C.out,k:"nap",lbl:"Nap",note:rdur(C.nap)+" — this is sleep, not a time-out."});
+    S.push({t:t+C.free+C.out,k:"nap",lbl:"Nap",
+      note:"Until she wakes — the "+rdur(C.nap)+" is the slot, not a target. Never wake her for the schedule."});
     t+=cyc; n++;
     if(t<close-20)S.push({t:t,k:"out",lbl:"Outside",note:"Straight out of the pen, no exceptions."});
   }
@@ -1275,7 +1276,10 @@ function nextStep(steps){
 }
 function renderDay(){
   var v=$("#v-day");v.innerHTML="";
-  var R=DB.routine, out=buildDay(R), m=out.m;
+  var R=DB.routine;
+  // a loop re-based yesterday must not govern today
+  if(R.loopStart&&R.loopDay&&R.loopDay!==dayKey(Date.now())){R.loopStart="";R.loopDay="";save();}
+  var out=buildDay(R), m=out.m;
 
   // ---- anchors ----
   var g=el("div","card");
@@ -1292,6 +1296,22 @@ function renderDay(){
   g.appendChild(el("div","tiny","Leave the middle one blank on a weekday — it follows the first. On a weekend it slides "+
     "while her breakfast stays put, so she isn't waiting on you to eat. Cap on her day: "+rfmt(rmins(R.dayCap))+"."));
   var tog=el("div","chips");
+  /* The day drifts — two empty trips, a long settle, a nap that ran on. The
+     printed times are a shape, not alarms, so rather than nudging every row
+     you re-base the loop on the moment she actually woke. */
+  var rb=el("button","chip mini","⟳ She's up — restart from now");
+  rb.onclick=function(){
+    var d=new Date();
+    R.loopStart=pad(d.getHours())+":"+pad(d.getMinutes());
+    R.loopDay=dayKey(Date.now());
+    save();renderDay();renderStats();vibe(12);
+  };
+  tog.appendChild(rb);
+  if(R.loopStart){
+    var cl=el("button","chip mini","↺ back to plan");
+    cl.onclick=function(){R.loopStart="";R.loopDay="";save();renderDay();renderStats();};
+    tog.appendChild(cl);
+  }
   var ob=el("button","chip"+(R.out.on?" on":""),(R.out.on?"✓ ":"")+"Out of the house");
   ob.onclick=function(){R.out.on=!R.out.on;save();renderDay();renderStats();};
   tog.appendChild(ob);
@@ -1389,12 +1409,29 @@ function renderDay(){
   [["Step one","Five to ten boring minutes in the yard corner. No play, no chat."],
    ["Step two","Back inside, straight into the pen for 10–20 minutes."],
    ["Step three","Try again. Repeat until she goes."],
-   ["Never","Back to free time on an empty trip. That is the accident."]].forEach(function(x){
+   ["If she falls asleep waiting","The ladder ends there. Don't wake her, don't keep trying — the next trip is when she wakes, and that is the highest-yield one of the day."],
+   ["Never","Back to free time on an empty trip. That is the accident."],
+   ["Straining, or nothing all day","Repeated squatting with no result, crying while trying, no urine across a long awake stretch, or no stool in a day — that is a vet call, not a schedule problem."]].forEach(function(x){
     var r=el("div","mile");var mid=el("div");mid.style.flex="1";
     mid.appendChild(el("div","mt",x[0]));mid.appendChild(el("div","ms",x[1]));
     r.appendChild(mid);ng.appendChild(r);
   });
   v.appendChild(ng);
+
+  v.appendChild(el("div","sec","If she's already asleep"));
+  var nc=el("div","card");
+  [["Never wake her for the schedule","A sleeping puppy is the goal. Where it happens is a preference you fix across a week, not nap by nap."],
+   ["Asleep on the floor near you","Let her sleep. You lost an alone-time rep, not the nap. Lift her in if you have to leave the room."],
+   ["Asleep on the sofa or a chair","Move her every time — for her back, not the schedule. The risk is the jump down when she wakes."],
+   ["Awake and wired at nap time","That is overtiredness, not energy. Pen, lights low, brief protest, then she crashes. Playing makes it worse."],
+   ["Why the pen and not your lap","It is where the tray is when she wakes, and it is the only way the alone-time items get practised before Sep 27."]
+  ].forEach(function(x){
+    var r=el("div","mile");var mid=el("div");mid.style.flex="1";
+    mid.appendChild(el("div","mt",x[0]));mid.appendChild(el("div","ms",x[1]));
+    r.appendChild(mid);nc.appendChild(r);
+  });
+  v.appendChild(nc);
+
   v.appendChild(el("div","tiny","Times are offsets from the anchors above, never fixed clock times — "+
     "the shape of the day is the same whenever it starts. Handbook §12 and §13 are the source; where this "+
     "differs from them the difference is deliberate and recorded there."));
