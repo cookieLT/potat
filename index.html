@@ -117,6 +117,22 @@ main{padding:12px 14px 132px;max-width:560px;margin:0 auto}
 .cross .ck{font-size:11.5px;color:var(--muted);font-weight:600;letter-spacing:.02em}
 .cross .cv{font-size:17px;font-weight:700;margin-top:2px}
 .cross .cs{font-size:12.5px;color:var(--ink2);margin-top:3px;line-height:1.45}
+.tm2{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;color:var(--muted);
+  min-width:62px;padding-top:3px;font-variant-numeric:tabular-nums}
+.tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  padding:2px 8px;border-radius:20px;margin-bottom:2px}
+.k-out{background:rgba(12,163,12,.14);color:var(--good)}
+.k-meal{background:rgba(250,178,25,.16);color:#8a6100}
+.k-nap{background:rgba(41,120,214,.13);color:var(--accent)}
+.k-free{background:var(--surf2);color:var(--ink2)}
+.k-pen{background:var(--surf2);color:var(--muted)}
+.k-bed{background:rgba(208,59,59,.13);color:var(--crit)}
+.tdot{width:24px;height:24px;border-radius:50%;background:var(--surf2);color:var(--muted);
+  display:grid;place-items:center;font-size:12px;font-weight:800;flex:0 0 auto}
+.tdot.due{background:var(--warn);color:#3a2a00}
+.tdot.done{background:var(--good);color:#fff}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .k-meal{color:var(--warn)}}
+:root[data-theme="dark"] .k-meal{color:var(--warn)}
 .bar{height:7px;border-radius:99px;background:var(--surf2);margin:10px 0 9px;overflow:hidden}
 .barf{height:100%;background:var(--accent);border-radius:99px;transition:width .25s ease}
 .rep{font-size:10.5px;font-weight:700;color:var(--accent);letter-spacing:.03em;text-transform:uppercase}
@@ -206,7 +222,8 @@ nav button.on{color:var(--accent)}
 </header>
 
 <main>
-  <section id="v-care"></section>
+  <section id="v-day"></section>
+  <section id="v-care" class="hide"></section>
   <section id="v-soc" class="hide"></section>
   <section id="v-rec" class="hide"></section>
   <section id="v-log" class="hide"></section>
@@ -217,7 +234,8 @@ nav button.on{color:var(--accent)}
 <div id="quick"></div>
 
 <nav>
-  <button data-tab="care" class="on"><span class="ne">📅</span>Care</button>
+  <button data-tab="day" class="on"><span class="ne">🔁</span>Day</button>
+  <button data-tab="care"><span class="ne">📅</span>Care</button>
   <button data-tab="soc"><span class="ne">✅</span>Socialize</button>
   <button data-tab="rec"><span class="ne">📇</span>Records</button>
   <button data-tab="log"><span class="ne">🐾</span>Log</button>
@@ -230,7 +248,7 @@ nav button.on{color:var(--accent)}
 "use strict";
 /* ============================ storage ============================ */
 var KEY="potat.tracker.v1", OLDKEY="violet.tracker.v1";
-var BUILD="2026-08-26 · f";      // shown in Settings so we can tell builds apart
+var BUILD="2026-08-28 · g";      // shown in Settings so we can tell builds apart
 var BORN=new Date(2026,5,7);           // June 7, 2026
 var storageOK=true;
 try{localStorage.setItem("__t","1");localStorage.removeItem("__t");}catch(e){storageOK=false;}
@@ -303,8 +321,16 @@ var DEFAULT_SOC=[
    ["s-b3","Alone in the house for thirty"],["s-b4","Alone for an hour"]]}
 ];
 
+var ROUTINE_DEF={
+  dayStart:"11:00", dayCap:"12:30", loopStart:"", penClose:"23:30",
+  cycle:{free:60,out:5,nap:85},          // 150 minutes, one turn of the loop
+  meals:4, snack:true,                   // §12: small snack or warm goat milk before the crate
+  inv:{maxPenned:780, maxFast:780, minMealGap:120}   // 13h penned, 13h fast, 2h apart
+};
+
 function defaultDB(){return{v:1,events:[],weights:[],types:JSON.parse(JSON.stringify(DEFAULT_TYPES)),
   miles:JSON.parse(JSON.stringify(DEFAULT_MILES)),done:{},
+  routine:JSON.parse(JSON.stringify(ROUTINE_DEF)),
   rec:{chip:"",chipReg:"",vet:"",vetTel:"",er:"",erTel:"",ins:"",insNo:"",breeder:"",breederTel:"",vax:[],notes:""},
   settings:{theme:"auto",unit:"lb",adultLb:20,adultSet:false,meals:3},
   seq:1,did:newDeviceId(),idv:2};}
@@ -347,6 +373,9 @@ function normalize(d){
     }
     d.weights.forEach(function(w,k){if(!w.id)w.id=d.did+"-w"+k+"-"+w.ts;});
     for(var sk in b.settings){if(!(sk in d.settings))d.settings[sk]=b.settings[sk];}
+    if(!d.routine)d.routine=b.routine;
+    for(var rq in b.routine){if(!(rq in d.routine))d.routine[rq]=b.routine[rq];}
+    if(!d.routine.inv)d.routine.inv=b.routine.inv;
     if(!d.rec)d.rec=b.rec;
     for(var rk in b.rec){if(!(rk in d.rec))d.rec[rk]=b.rec[rk];}
     // ship any new default milestones the user hasn't got (repeating ones especially)
@@ -426,6 +455,155 @@ function fmtShort(ms){                       // seconds matter here; fmtDur roun
   var s=Math.round(ms/1000);
   if(s<60)return s+"s";
   return Math.floor(s/60)+"m "+pad(s%60)+"s";
+}
+
+/* ============================ the daily loop ============================
+   Offsets, not clock times. Two anchors, because "pen opens" was doing four
+   jobs at once and on a weekend they come apart:
+
+     dayStart  — her first potty and first meal. Tied to HER morning.
+                 Capped: it must not drift with whoever is still asleep.
+     loopStart — when supervised free time can begin. Tied to Leah's morning.
+
+   On a weekday they are the same time and nothing changes. On a weekend
+   dayStart holds while loopStart slides, and she is fed and emptied in
+   between rather than penned through it.
+
+   Some quantities must NOT scale with the anchors — a longer lie-in cannot
+   mean a longer fast. Those are invariants, checked and reported, never
+   silently absorbed. */
+function rmins(v){var p=String(v||"").split(":");return (+p[0])*60+(+p[1]||0);}
+function rfmt(m){m=((m%1440)+1440)%1440;var h=Math.floor(m/60),x=m%60,s=h<12?"am":"pm";
+  h=h%12||12;return h+":"+pad(x)+s;}
+function rdur(m){m=Math.round(m);return Math.floor(m/60)+"h"+(m%60?pad(m%60):"");}
+
+/* Lay out one day. Pure — give it anchors, get back steps plus the numbers
+   that decide whether the day is actually acceptable. */
+function buildDay(a){
+  var open=rmins(a.dayStart), close=rmins(a.penClose);
+  var loop=a.loopStart?rmins(a.loopStart):open;
+  if(close<=open)close+=1440;
+  if(loop<open)loop+=1440;
+  if(loop>close-60)loop=close-60;                 // nonsense guard
+  var C=a.cycle, cyc=C.free+C.out+C.nap, S=[];
+
+  S.push({t:open,k:"out",lbl:"Outside",note:"Straight out of the pen, before anything else. Carry her to the corner."});
+  S.push({t:open+15,k:"meal",lbl:"Meal 1",note:"Outside again 15 minutes after she finishes."});
+  if(loop>open+45)
+    S.push({t:open+40,k:"pen",lbl:"Back in the pen",note:"Fed and emptied. She rests here until you are free."});
+
+  // cycle starts are the only places a meal may land — never inside a nap
+  var slots=[], t=loop, n=0;
+  while(t+cyc<=close-20){
+    slots.push(t);
+    S.push({t:t,k:"free",lbl:"Free time",note:n<2?
+      "Cat session goes in this block — short, her on a leash, cats free to leave.":
+      "Supervised. Let it run longer if she is settled and you are watching."});
+    S.push({t:t+C.free,k:"out",lbl:"Outside",note:"Then into the pen."});
+    S.push({t:t+C.free+C.out,k:"nap",lbl:"Nap",note:rdur(C.nap)+" — this is sleep, not a time-out."});
+    t+=cyc; n++;
+    if(t<close-20)S.push({t:t,k:"out",lbl:"Outside",note:"Straight out of the pen, no exceptions."});
+  }
+  var wind=null;
+  if(t<close-20){wind=t;slots.push(t);
+    S.push({t:t,k:"free",lbl:"Wind-down",note:"Calm only. No wrestling, no zoomies before bed."});}
+
+  /* Meals 2..N. Two safe positions per cycle: the start of free time, or 45
+     minutes in — the latter puts the "outside 15 minutes after a meal" trip
+     exactly on the scheduled trip that already ends that block. Snapping to
+     cycle starts alone quantises meals to 2.5-hour multiples and blows a
+     five-hour hole in the middle of the day, so we search both positions for
+     the most even spacing rather than taking the nearest slot each time. */
+  var meals=[open+15], want=a.meals-1;
+  if(want>0){
+    var cand=[];
+    slots.forEach(function(x){cand.push(x);cand.push(x+45);});
+    cand=cand.filter(function(x){return x>=open+15+a.inv.minMealGap&&x<=close-45;});
+    var lateOK=cand.filter(function(x){return x>=close-190;});
+    var best=null;
+    (function pick(start,acc){
+      if(acc.length===want){
+        if(lateOK.length&&acc[acc.length-1]<close-190)return;   // keep the fast down
+        var seq=[open+15].concat(acc), g=[];
+        for(var i=1;i<seq.length;i++)g.push(seq[i]-seq[i-1]);
+        var lo=Math.min.apply(null,g), hi=Math.max.apply(null,g);
+        var lastFeed=a.snack?close-45:seq[seq.length-1];
+        var fast=(open+15+1440)-lastFeed;
+        var score=(hi-lo)+(lo<a.inv.minMealGap?600:0)+Math.max(0,fast-a.inv.maxFast)*2;
+        if(!best||score<best.score||(score===best.score&&acc[acc.length-1]>best.acc[best.acc.length-1]))
+          best={score:score,acc:acc.slice()};
+        return;
+      }
+      for(var i=start;i<cand.length;i++){acc.push(cand[i]);pick(i+1,acc);acc.pop();}
+    })(0,[]);
+    if(best)meals=[open+15].concat(best.acc);
+    else{                                    // not enough blocks — space evenly and warn
+      var lastT=slots.length?slots[slots.length-1]:close-60;
+      for(var j=1;j<=want;j++)meals.push(Math.round((open+15)+((lastT-(open+15))*j/want)));
+    }
+    meals.sort(function(x,y){return x-y;});
+  }
+  meals.forEach(function(m,i){
+    if(i===0)return;
+    S.push({t:m,k:"meal",lbl:"Meal "+(i+1),
+      note:i===meals.length-1?"Last of the day. Outside 15 minutes after.":"Outside again 15 minutes after she finishes."});
+  });
+
+  if(a.snack)S.push({t:close-45,k:"meal",lbl:"Bedtime snack",
+    note:"Small — or warm goat milk. §12 keeps this; the loop spec dropped it. It is what bridges the overnight gap."});
+  S.push({t:close-15,k:"out",lbl:"Final trip outside",note:"Give her the full ten minutes. Grooming before this, not after."});
+  S.push({t:close,k:"bed",lbl:"Tray in, pen closes",note:"Her bedtime is fixed whether or not you are still up."});
+  S.sort(function(x,y){return x.t-y.t || (x.k==="out"?-1:1);});
+
+  var lastMeal=meals[meals.length-1];
+  var lastFeed=a.snack?close-45:lastMeal;
+  var m={
+    penned:(open+1440)-close,                       // pen closes, reopens next morning
+    awake:close-open,
+    fast:(open+15+1440)-lastFeed,                  // last thing she eats → first meal
+    settle:close-lastFeed,                          // last meal → pen closes
+    cycles:n, wind:wind, meals:meals,
+    gaps:meals.slice(1).map(function(x,i){return x-meals[i];}),
+    lateStart:rmins(a.dayStart)>rmins(a.dayCap)
+  };
+  m.warn=[];
+  if(m.lateStart)m.warn.push({k:"cap",txt:"Day started after the "+rfmt(rmins(a.dayCap))+" cap."});
+  if(m.penned>a.inv.maxPenned)m.warn.push({k:"penned",txt:"Penned "+rdur(m.penned)+" overnight — past the "+rdur(a.inv.maxPenned)+" you set."});
+  if(m.fast>a.inv.maxFast)m.warn.push({k:"fast",txt:rdur(m.fast)+" between her last food and her first, past the "+rdur(a.inv.maxFast)+" limit."+
+    (a.snack?"":" §12 puts a small snack or warm goat milk before the crate — turning that back on is what closes this gap.")});
+  var tight=m.gaps.filter(function(g){return g<a.inv.minMealGap;}).length;
+  if(tight)m.warn.push({k:"gap",txt:tight+" meal gap"+(tight>1?"s":"")+" under "+rdur(a.inv.minMealGap)+". Regular spacing is what makes her poop predictable."});
+  return {steps:S,m:m};
+}
+
+/* Out-of-cycle trips. These are events, not scheduled steps — they hang off
+   what actually happened. If nothing was logged we fall back to the planned
+   time, so the rules still show up without costing a tap. */
+var TRIGGERS=[
+ {id:"tg-meal", src:"food",  edge:"start", mins:15, lbl:"15 minutes after a meal"},
+ {id:"tg-nap",  src:"sleep", edge:"end",   mins:0,  lbl:"The moment she wakes"},
+ {id:"tg-water",src:"water", edge:"start", mins:0,  lbl:"After a big drink"},
+ {id:"tg-play", src:"play",  edge:"end",   mins:0,  lbl:"After any burst of play"}
+];
+function triggerState(now){
+  now=now||Date.now();
+  var wentOut=null;
+  DB.events.forEach(function(e){
+    if((e.t==="pee"||e.t==="poop")&&(!wentOut||e.ts>wentOut))wentOut=e.ts;
+  });
+  return TRIGGERS.map(function(g){
+    var src=null;
+    DB.events.forEach(function(e){
+      if(e.t!==g.src)return;
+      if(g.edge==="end"&&e.end===null)return;        // still going
+      var when=g.edge==="end"?(e.end||e.ts):e.ts;
+      if(!src||when>src)src=when;
+    });
+    if(src===null)return{g:g,state:"idle"};
+    var due=src+g.mins*60000;
+    if(wentOut&&wentOut>=src)return{g:g,state:"done",at:due};
+    return{g:g,state:due<=now?"due":"pending",at:due};
+  });
 }
 
 /* ============================ feeding guidance ============================
@@ -617,6 +795,14 @@ function renderStats(){
   /* Outside the Log tab, a row of zeroes just reads as "you are behind".
      Show what is actually coming up instead. */
   if(TAB!=="log"){
+    if(TAB==="day"){
+      var rr=buildDay(DB.routine);
+      var nx=nextStep(rr.steps);
+      if(nx){var np=el("div","pill");np.innerHTML="⏭ "+nx.lbl+" · <b>"+rfmt(nx.t)+"</b>";s.appendChild(np);}
+      if(rr.m.warn.length){var wp=el("div","pill alert");
+        wp.innerHTML="⚠️ <b>"+rr.m.warn.length+"</b> to look at";s.appendChild(wp);}
+      return;
+    }
     var up=nextDue();
     if(up){
       var d=el("div","pill"+(up.days<=7?" alert":""));
@@ -964,6 +1150,110 @@ function tickRepeat(m){
   m.d=dayKey(next.getTime());
   DB.done[m.id]=false;
 }
+/* ============================ render: the day ============================ */
+function nextStep(steps){
+  var d=new Date(),now=d.getHours()*60+d.getMinutes();
+  for(var i=0;i<steps.length;i++)if(steps[i].t%1440>now)return steps[i];
+  return null;
+}
+function renderDay(){
+  var v=$("#v-day");v.innerHTML="";
+  var R=DB.routine, out=buildDay(R), m=out.m;
+
+  // ---- anchors ----
+  var g=el("div","card");
+  var row=el("div","row");
+  [["Pen opens — her day","dayStart"],["You're free — loop starts","loopStart"],["Pen closes","penClose"]]
+  .forEach(function(f){
+    var w=el("div");w.style.flex="1 1 96px";w.style.minWidth="0";
+    w.appendChild(el("div","lbl",f[0]));
+    var i=el("input");i.type="time";i.value=R[f[1]]||"";
+    i.onchange=function(){R[f[1]]=i.value;save();renderDay();renderStats();};
+    w.appendChild(i);row.appendChild(w);
+  });
+  g.appendChild(row);
+  g.appendChild(el("div","tiny","Leave the middle one blank on a weekday — it follows the first. On a weekend it slides "+
+    "while her breakfast stays put, so she isn't waiting on you to eat. Cap on her day: "+rfmt(rmins(R.dayCap))+"."));
+  var tog=el("div","chips");
+  var sb=el("button","chip"+(R.snack?" on":""),(R.snack?"✓ ":"")+"Bedtime snack");
+  sb.onclick=function(){R.snack=!R.snack;save();renderDay();renderStats();};
+  tog.appendChild(sb);
+  var mb=el("button","chip mini",R.meals+" meals");
+  mb.onclick=function(){var x=prompt("Meals a day",R.meals);x=parseInt(x,10);
+    if(x>0&&x<9){R.meals=x;save();renderDay();}};
+  tog.appendChild(mb);
+  g.appendChild(tog);
+  v.appendChild(g);
+
+  // ---- what the anchors cost ----
+  if(m.warn.length){
+    var w=el("div","card emcard");
+    w.appendChild(el("div","emh",m.warn.length===1?"One thing to look at":m.warn.length+" things to look at"));
+    m.warn.forEach(function(x){w.appendChild(el("div","emb",x.txt));});
+    v.appendChild(w);
+  }
+  var st=el("div","tiles");
+  st.appendChild(stat("Awake",rdur(m.awake),m.cycles+" full cycle"+(m.cycles===1?"":"s")));
+  st.appendChild(stat("Penned overnight",rdur(m.penned),"pen shuts "+rfmt(rmins(R.penClose))));
+  st.appendChild(stat("Longest gap without food",rdur(m.fast),R.snack?"snack included":"no bedtime snack"));
+  st.appendChild(stat("Meals",String(m.meals.length),"spaced "+m.gaps.map(rdur).join(" · ")));
+  v.appendChild(st);
+
+  // ---- the day ----
+  v.appendChild(el("div","sec","The day"));
+  var tl=el("div","tl");
+  var d=new Date(),now=d.getHours()*60+d.getMinutes();
+  out.steps.forEach(function(x){
+    var r=el("div","ev");
+    if(x.t%1440<=now)r.style.opacity=".45";
+    r.appendChild(el("div","tm2",rfmt(x.t)));
+    var mid=el("div","mid");
+    var tag=el("span","tag k-"+x.k,x.lbl);
+    mid.appendChild(tag);
+    mid.appendChild(el("div","t2",x.note));
+    r.appendChild(mid);
+    tl.appendChild(r);
+  });
+  v.appendChild(tl);
+
+  // ---- triggers ----
+  v.appendChild(el("div","sec","Outside anyway — not on the clock"));
+  var tc=el("div","card");tc.id="triggers";
+  triggerState().forEach(function(t){
+    var r=el("div","mile");
+    var dot=el("div","tdot"+(t.state==="due"?" due":t.state==="done"?" done":""),
+      t.state==="due"?"!":t.state==="done"?"✓":"·");
+    r.appendChild(dot);
+    var mid=el("div");mid.style.flex="1";
+    mid.appendChild(el("div","mt",t.g.lbl));
+    mid.appendChild(el("div","ms",
+      t.state==="idle"?"Nothing logged yet — it still applies.":
+      t.state==="due"?"Due now — logged at "+fmtTime(t.at)+", no trip since.":
+      t.state==="done"?"Covered by a trip you logged.":
+      "Due at "+fmtTime(t.at)+"."));
+    r.appendChild(mid);
+    tc.appendChild(r);
+  });
+  tc.appendChild(el("div","tiny","These hang off what actually happened, so they only light up if the meal or nap "+
+    "got logged. They apply either way — logging just makes the app able to tell you."));
+  v.appendChild(tc);
+
+  v.appendChild(el("div","sec","If she doesn't go"));
+  var ng=el("div","card");
+  [["Step one","Five to ten boring minutes in the yard corner. No play, no chat."],
+   ["Step two","Back inside, straight into the pen for 10–20 minutes."],
+   ["Step three","Try again. Repeat until she goes."],
+   ["Never","Back to free time on an empty trip. That is the accident."]].forEach(function(x){
+    var r=el("div","mile");var mid=el("div");mid.style.flex="1";
+    mid.appendChild(el("div","mt",x[0]));mid.appendChild(el("div","ms",x[1]));
+    r.appendChild(mid);ng.appendChild(r);
+  });
+  v.appendChild(ng);
+  v.appendChild(el("div","tiny","Times are offsets from the anchors above, never fixed clock times — "+
+    "the shape of the day is the same whenever it starts. Handbook §12 and §13 are the source; where this "+
+    "differs from them the difference is deliberate and recorded there."));
+}
+
 /* ============================ render: socialize ============================ */
 function renderSoc(){
   var v=$("#v-soc");v.innerHTML="";
@@ -1376,10 +1666,11 @@ function applyTheme(){
 }
 
 /* ============================ shell ============================ */
-var TAB="care", LOGSUB="log";
+var TAB="day", LOGSUB="log";
 function renderAll(){
   renderStats();
-  if(TAB==="care")renderCare();
+  if(TAB==="day")renderDay();
+  else if(TAB==="care")renderCare();
   else if(TAB==="soc")renderSoc();
   else if(TAB==="rec")renderRec();
   else if(LOGSUB==="today")renderToday();
@@ -1405,7 +1696,7 @@ document.querySelectorAll("nav button").forEach(function(b){
   b.onclick=function(){
     TAB=b.dataset.tab;
     document.querySelectorAll("nav button").forEach(function(x){x.classList.toggle("on",x===b);});
-    ["care","soc","rec"].forEach(function(t){
+    ["day","care","soc","rec"].forEach(function(t){
       $("#v-"+t).classList.toggle("hide",t!==TAB);});
     showLogSub();
     renderAll();window.scrollTo(0,0);
