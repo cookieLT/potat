@@ -127,6 +127,9 @@ main{padding:12px 14px 132px;max-width:560px;margin:0 auto}
 .k-nap{background:rgba(41,120,214,.13);color:var(--accent)}
 .k-free{background:var(--surf2);color:var(--ink2)}
 .k-pen{background:var(--surf2);color:var(--muted)}
+.k-outing{background:rgba(139,111,212,.16);color:#6b4fb8}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .k-outing{color:#b9a3ee}}
+:root[data-theme="dark"] .k-outing{color:#b9a3ee}
 .k-bed{background:rgba(208,59,59,.13);color:var(--crit)}
 .tdot{width:24px;height:24px;border-radius:50%;background:var(--surf2);color:var(--muted);
   display:grid;place-items:center;font-size:12px;font-weight:800;flex:0 0 auto}
@@ -249,7 +252,7 @@ nav button.on{color:var(--accent)}
 "use strict";
 /* ============================ storage ============================ */
 var KEY="potat.tracker.v1", OLDKEY="violet.tracker.v1";
-var BUILD="2026-08-28 · h";      // shown in Settings so we can tell builds apart
+var BUILD="2026-08-28 · j";      // shown in Settings so we can tell builds apart
 var BORN=new Date(2026,5,7);           // June 7, 2026
 var storageOK=true;
 try{localStorage.setItem("__t","1");localStorage.removeItem("__t");}catch(e){storageOK=false;}
@@ -326,6 +329,7 @@ var ROUTINE_DEF={
   dayStart:"11:00", dayCap:"12:30", loopStart:"", penClose:"23:30",
   cycle:{free:60,out:5,nap:85},          // 150 minutes, one turn of the loop
   meals:4, snack:true,                   // §12: small snack or warm goat milk before the crate
+  out:{on:false, start:"14:00", mins:120, withHer:true},   // an errand or an outing
   inv:{maxPenned:780, maxFast:780, minMealGap:120}   // 13h penned, 13h fast, 2h apart
 };
 
@@ -480,6 +484,28 @@ function rdur(m){m=Math.round(m);return Math.floor(m/60)+"h"+(m%60?pad(m%60):"")
 
 /* Lay out one day. Pure — give it anchors, get back steps plus the numbers
    that decide whether the day is actually acceptable. */
+var RANK={out:0,meal:1,outing:2,free:3,nap:4,pen:5,bed:6};
+/* Nothing edible may sit inside a nap. Runs after meal placement AND again
+   after an outing reflows the day, because the outing creates a nap of its
+   own that the first pass could not have seen. */
+function repairMeals(meals,S,napLen,close){
+  var napR=[],shifted=0;
+  S.forEach(function(x){if(x.k==="nap")napR.push([x.t,x.t+napLen]);});
+  for(var mi=1;mi<meals.length;mi++){
+    for(var ni=0;ni<napR.length;ni++){
+      if(meals[mi]>napR[ni][0]&&meals[mi]<napR[ni][1]){
+        var toEnd=napR[ni][1]-meals[mi], toStart=meals[mi]-napR[ni][0];
+        var moved=(toEnd<=toStart)?napR[ni][1]:napR[ni][0];
+        if(moved>close-45)moved=napR[ni][0];
+        if(moved<=meals[mi-1])moved=napR[ni][1];
+        meals[mi]=moved; shifted++;
+        break;
+      }
+    }
+  }
+  meals.sort(function(x,y){return x-y;});
+  return shifted;
+}
 function buildDay(a){
   var open=rmins(a.dayStart), close=rmins(a.penClose);
   var loop=a.loopStart?rmins(a.loopStart):open;
@@ -505,9 +531,15 @@ function buildDay(a){
     t+=cyc; n++;
     if(t<close-20)S.push({t:t,k:"out",lbl:"Outside",note:"Straight out of the pen, no exceptions."});
   }
-  var wind=null;
-  if(t<close-20){wind=t;slots.push(t);
+  /* A wind-down block only earns its place if there is real time for one.
+     Without the floor, a pen-close 20 minutes after the last cycle produced a
+     15-minute "wind-down" wedged between the final trip and bed. */
+  var wind=null, tail=close-t, MINWIND=45;
+  if(tail>=MINWIND){wind=t;slots.push(t);
     S.push({t:t,k:"free",lbl:"Wind-down",note:"Calm only. No wrestling, no zoomies before bed."});}
+  else if(S.length){                       // no room: drop the trailing trip, the final one covers it
+    for(var z=S.length-1;z>=0;z--){if(S[z].k==="out"&&S[z].t===t){S.splice(z,1);break;}}
+  }
 
   /* Meals 2..N. Two safe positions per cycle: the start of free time, or 45
      minutes in — the latter puts the "outside 15 minutes after a meal" trip
@@ -544,21 +576,98 @@ function buildDay(a){
     }
     meals.sort(function(x,y){return x-y;});
   }
+  /* Repair pass. The search above can only pick safe slots, but the
+     fallback for a day too short to hold every meal spaces them evenly and
+     could drop one into a nap. Enforce the rule once, after either path,
+     so it cannot depend on which branch ran. */
+  var shifted=repairMeals(meals,S,C.nap,close);
   meals.forEach(function(m,i){
     if(i===0)return;
     S.push({t:m,k:"meal",lbl:"Meal "+(i+1),
       note:i===meals.length-1?"Last of the day. Outside 15 minutes after.":"Outside again 15 minutes after she finishes."});
   });
 
-  if(a.snack)S.push({t:close-45,k:"meal",lbl:"Bedtime snack",
+  /* The snack was pinned to close-45 with no nap check — the one rule meals
+     obey. With a late pen-close that put it inside the last nap. */
+  var snackAt=close-45;
+  if(!wind)snackAt=Math.max(snackAt,t);    // t is where the last nap ends
+  if(snackAt>close-25)snackAt=close-25;
+  if(a.snack)S.push({t:snackAt,k:"meal",lbl:"Bedtime snack",
     note:"Small — or warm goat milk. §12 keeps this; the loop spec dropped it. It is what bridges the overnight gap."});
   S.push({t:close-15,k:"out",lbl:"Final trip outside",note:"Give her the full ten minutes. Grooming before this, not after."});
   S.push({t:close,k:"bed",lbl:"Tray in, pen closes",note:"Her bedtime is fixed whether or not you are still up."});
-  var RANK={out:0,meal:1,free:2,nap:3,pen:4,bed:5};
   S.sort(function(x,y){return (x.t-y.t) || (RANK[x.k]-RANK[y.k]);});
 
+  /* ---- an outing or an errand displaces part of the day ----
+     Two quite different cases. If she comes, the block is her free time and
+     the cost is paid afterwards: novelty tires a puppy far more than it looks,
+     so the return leads into a protected nap. If she stays home she is penned
+     through it, rested by the time you are back, and what she needs is a trip
+     and then free time — not more rest. */
+  var O=a.out, away=null;
+  var snackT=snackAt;
+  if(O&&O.on){
+    var os=rmins(O.start), oe=os+Math.max(15,O.mins|0);
+    if(os<open)os=open; if(oe>close-30)oe=close-30;
+    if(oe>os+10){
+      away={s:os,e:oe,withHer:!!O.withHer};
+      var keep=[], moved=[];
+      S.forEach(function(x){
+        if(x.t>os-5&&x.t<oe&&x.k!=="bed"){ if(x.k==="meal")moved.push(x); return; }
+        keep.push(x);
+      });
+      S=keep;
+      S.push({t:Math.max(open,os-10),k:"out",lbl:"Outside before you leave",
+        note:"Empty her first — it is the difference between an outing and an incident."});
+      S.push({t:os,k:away.withHer?"outing":"pen",
+        lbl:away.withHer?"Out — she comes":"Home in the pen",
+        note:away.withHer?
+          "Crated in the car, lifted in and out, never tethered by the neck. Carried on the store floor until she is fully vaccinated. This is her free block — count it as socialisation, not extra to it.":
+          "She is penned with the tray for "+rdur(oe-os)+". A missed cycle, so the tray earns its keep here."});
+      S.push({t:oe,k:"out",lbl:"Outside the moment you're back",
+        note:away.withHer?"Before anything else, even the shopping.":"She has been holding it. Straight out."});
+      var after=oe+10;
+      moved.forEach(function(mv){
+        mv.t=after; mv.note="Pushed back — it fell while you were out."; S.push(mv);
+        after=mv.t+Math.max(45,a.inv.minMealGap/2);
+      });
+      /* Don't stack a new block on top of the lattice — if the cycle already
+         has one coming up, adopt it. Inserting blindly produced overlapping
+         naps and squeezed a meal between them. */
+      var want=after+(moved.length?30:15), kind=away.withHer?"nap":"free", found=null;
+      S.forEach(function(x){
+        if(x.k===kind&&x.t>=oe&&x.t<=want+90&&(!found||x.t<found.t))found=x;
+      });
+      var note=away.withHer?
+        "She will be more tired than she looks. Let it run long; do not trim it because she seems wired.":
+        "She has rested while you were out — she needs the company, not another nap.";
+      if(found){
+        if(away.withHer)found.lbl="Nap — protect this one";
+        found.note=note;
+      }else S.push({t:want,k:kind,lbl:away.withHer?"Nap — protect this one":"Free time",note:note});
+      // meals list follows the steps so the measurements stay honest
+      var mealSteps=S.filter(function(x){return x.k==="meal"&&x.lbl.indexOf("snack")<0;})
+                     .sort(function(x,y){return x.t-y.t;});
+      meals=mealSteps.map(function(x){return x.t;});
+      shifted+=repairMeals(meals,S,C.nap,close);   // the protected nap is new
+      mealSteps.forEach(function(st,i){st.t=meals[i];});
+      var snk=null;S.forEach(function(x){if(x.lbl==="Bedtime snack")snk=x;});
+      if(snk){                                   // same rule, same reason
+        var pair=[0,snk.t];
+        if(repairMeals(pair,S,C.nap,close)){
+          var want2=Math.min(pair[1],close-20), safe=want2;
+          S.forEach(function(x){                 // if clamping lands back in a nap, go before it
+            if(x.k==="nap"&&want2>x.t&&want2<x.t+C.nap)safe=x.t-5;
+          });
+          snk.t=safe; snackT=safe;
+        }
+      }
+      S.sort(function(x,y){return (x.t-y.t)||(RANK[x.k]-RANK[y.k]);});
+    }
+  }
+
   var lastMeal=meals[meals.length-1];
-  var lastFeed=a.snack?close-45:lastMeal;
+  var lastFeed=a.snack?snackT:lastMeal;
   var m={
     penned:(open+1440)-close,                       // pen closes, reopens next morning
     awake:close-open,
@@ -573,6 +682,12 @@ function buildDay(a){
   if(m.penned>a.inv.maxPenned)m.warn.push({k:"penned",txt:"Penned "+rdur(m.penned)+" overnight — past the "+rdur(a.inv.maxPenned)+" you set."});
   if(m.fast>a.inv.maxFast)m.warn.push({k:"fast",txt:rdur(m.fast)+" between her last food and her first, past the "+rdur(a.inv.maxFast)+" limit."+
     (a.snack?"":" §12 puts a small snack or warm goat milk before the crate — turning that back on is what closes this gap.")});
+  if(away&&!away.withHer&&(away.e-away.s)>180)m.warn.push({k:"away",
+    txt:"Penned "+rdur(away.e-away.s)+" while you are out, on top of the night. Expect the tray, and go straight out when you get back."});
+  if(away&&away.withHer&&(away.e-away.s)>120)m.warn.push({k:"away",
+    txt:rdur(away.e-away.s)+" out is a long trip at her age. Watch for her shutting down rather than settling, and let the nap afterwards run."});
+  if(shifted)m.warn.push({k:"squeeze",txt:"The day is short for "+a.meals+" meals — "+shifted+
+    " had to be moved off a nap. Either drop a meal or start her day earlier."});
   var tight=m.gaps.filter(function(g){return g<a.inv.minMealGap;}).length;
   if(tight)m.warn.push({k:"gap",txt:tight+" meal gap"+(tight>1?"s":"")+" under "+rdur(a.inv.minMealGap)+". Regular spacing is what makes her poop predictable."});
   return {steps:S,m:m};
@@ -1177,6 +1292,9 @@ function renderDay(){
   g.appendChild(el("div","tiny","Leave the middle one blank on a weekday — it follows the first. On a weekend it slides "+
     "while her breakfast stays put, so she isn't waiting on you to eat. Cap on her day: "+rfmt(rmins(R.dayCap))+"."));
   var tog=el("div","chips");
+  var ob=el("button","chip"+(R.out.on?" on":""),(R.out.on?"✓ ":"")+"Out of the house");
+  ob.onclick=function(){R.out.on=!R.out.on;save();renderDay();renderStats();};
+  tog.appendChild(ob);
   var sb=el("button","chip"+(R.snack?" on":""),(R.snack?"✓ ":"")+"Bedtime snack");
   sb.onclick=function(){R.snack=!R.snack;save();renderDay();renderStats();};
   tog.appendChild(sb);
@@ -1185,6 +1303,27 @@ function renderDay(){
     if(x>0&&x<9){R.meals=x;save();renderDay();}};
   tog.appendChild(mb);
   g.appendChild(tog);
+  if(R.out.on){
+    var ow=el("div","row");ow.style.marginTop="9px";
+    var c1=el("div");c1.style.flex="1 1 96px";c1.style.minWidth="0";
+    c1.appendChild(el("div","lbl","Leaving at"));
+    var oi=el("input");oi.type="time";oi.value=R.out.start;
+    oi.onchange=function(){R.out.start=oi.value;save();renderDay();renderStats();};
+    c1.appendChild(oi);ow.appendChild(c1);
+    var c2=el("div");c2.style.flex="1 1 96px";c2.style.minWidth="0";
+    c2.appendChild(el("div","lbl","For (minutes)"));
+    var mi2=el("input");mi2.type="number";mi2.min="15";mi2.step="15";mi2.value=R.out.mins;
+    mi2.onchange=function(){R.out.mins=parseInt(mi2.value,10)||60;save();renderDay();renderStats();};
+    c2.appendChild(mi2);ow.appendChild(c2);
+    g.appendChild(ow);
+    var wr2=el("div","chips");
+    [["She comes",true],["She stays home",false]].forEach(function(o){
+      var b2=el("button","chip"+(R.out.withHer===o[1]?" on":""),o[0]);
+      b2.onclick=function(){R.out.withHer=o[1];save();renderDay();renderStats();};
+      wr2.appendChild(b2);
+    });
+    g.appendChild(wr2);
+  }
   v.appendChild(g);
 
   // ---- what the anchors cost ----
