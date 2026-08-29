@@ -252,7 +252,7 @@ nav button.on{color:var(--accent)}
 "use strict";
 /* ============================ storage ============================ */
 var KEY="potat.tracker.v1", OLDKEY="violet.tracker.v1";
-var BUILD="2026-08-28 · n";      // shown in Settings so we can tell builds apart
+var BUILD="2026-08-28 · o";      // shown in Settings so we can tell builds apart
 var BORN=new Date(2026,5,7);           // June 7, 2026
 var storageOK=true;
 try{localStorage.setItem("__t","1");localStorage.removeItem("__t");}catch(e){storageOK=false;}
@@ -490,14 +490,14 @@ var RANK={out:0,meal:1,outing:2,free:3,nap:4,pen:5,bed:6};
    own that the first pass could not have seen. */
 function repairMeals(meals,S,napLen,close){
   var napR=[],shifted=0;
-  S.forEach(function(x){if(x.k==="nap")napR.push([x.t,x.t+napLen]);});
-  for(var mi=1;mi<meals.length;mi++){
+  S.forEach(function(x){if(x.k==="nap")napR.push([x.t,x.t+(x.len||napLen)]);});
+  for(var mi=0;mi<meals.length;mi++){
     for(var ni=0;ni<napR.length;ni++){
       if(meals[mi]>napR[ni][0]&&meals[mi]<napR[ni][1]){
         var toEnd=napR[ni][1]-meals[mi], toStart=meals[mi]-napR[ni][0];
         var moved=(toEnd<=toStart)?napR[ni][1]:napR[ni][0];
         if(moved>close-45)moved=napR[ni][0];
-        if(moved<=meals[mi-1])moved=napR[ni][1];
+        if(mi>0&&moved<=meals[mi-1])moved=napR[ni][1];
         meals[mi]=moved; shifted++;
         break;
       }
@@ -506,99 +506,129 @@ function repairMeals(meals,S,napLen,close){
   meals.sort(function(x,y){return x-y;});
   return shifted;
 }
+/* A nap runs until the next thing in the day, whatever that is. Naps are
+   remainders now, so this is what makes overlapping ones structurally
+   impossible after an outing has reflowed the day. A MEAL is deliberately not
+   allowed to end one — being woken to eat is the thing repairMeals exists to
+   catch, and truncating here would hide it instead. */
+function fitNaps(S,close){
+  var o=S.slice().sort(function(x,y){return (x.t-y.t)||(RANK[x.k]-RANK[y.k]);});
+  o.forEach(function(x,i){
+    if(x.k!=="nap")return;
+    var end=close;
+    for(var j=i+1;j<o.length;j++){if(o[j].t>x.t&&o[j].k!=="meal"){end=o[j].t;break;}}
+    x.len=Math.max(0,Math.min(x.len==null?end-x.t:x.len,end-x.t));
+  });
+}
 function buildDay(a){
   var open=rmins(a.dayStart), close=rmins(a.penClose);
   var loop=a.loopStart?rmins(a.loopStart):open;
   if(close<=open)close+=1440;
   if(loop<open)loop+=1440;
   if(loop>close-60)loop=close-60;                 // nonsense guard
-  var C=a.cycle, cyc=C.free+C.out+C.nap, S=[];
+  var C=a.cycle, S=[];
 
-  S.push({t:open,k:"out",lbl:"Outside",note:"Straight out of the pen, before anything else. Carry her to the corner."});
-  S.push({t:open+15,k:"meal",lbl:"Meal 1",note:"Outside again 15 minutes after she finishes."});
-  if(loop>open+45)
-    S.push({t:open+40,k:"pen",lbl:"Back in the pen",note:"Fed and emptied. She rests here until you are free."});
+  /* Block geometry. Every one of these is a real interval in her day, which
+     is why the nap is what is LEFT of a block rather than a number imposed
+     on it. Change one and the naps absorb it; that is the intent. */
+  var LEAD=10,      // out of the pen, to the corner and back — then the meal
+      POST=15,      // the gastrocolic window: the trip the meal does the work on
+      CAT=10,       // block 1 trades its free hour for a short cat session
+      TAIL=45,      // bedtime snack -> pen closes
+      EVENAP=70,    // the last nap, between the wind-down and the snack
+      MINFREE=15, MINNAP=20;
+  var EVENING=POST+C.out+C.free+C.out+EVENAP+TAIL;   // 3h20 at the shipped cycle
 
-  // cycle starts are the only places a meal may land — never inside a nap
-  var slots=[], t=loop, n=0;
-  while(t+cyc<=close-20){
-    slots.push(t);
-    S.push({t:t,k:"free",lbl:"Free time",note:n<2?
-      "Cat session goes in this block — short, her on a leash, cats free to leave.":
-      "Supervised. Let it run longer if she is settled and you are watching.",cyc:t});
-    S.push({t:t+C.free,k:"out",lbl:"Outside",note:"Then into the pen."});
-    S.push({t:t+C.free+C.out,k:"nap",lbl:"Nap",
-      note:"Until she wakes — the "+rdur(C.nap)+" is the slot, not a target. Never wake her for the schedule."});
-    t+=cyc; n++;
-    if(t<close-20)S.push({t:t,k:"out",lbl:"Outside",note:"Straight out of the pen, no exceptions."});
+  /* ---- meals first. They are what the day hangs off, not what gets fitted
+     around it. Meal 1 sits at her morning; the last one sits far enough from
+     the pen closing to hold a wind-down, a nap and the snack. The rest divide
+     what is between them.
+
+     Block 1 is short on purpose: after a twelve-hour night she needs the trip,
+     the food and more sleep, not an hour of play. It trades its free hour for
+     a few minutes with the cats, so its gap runs an hour shorter than the
+     others rather than leaving her idle. */
+  var nm=Math.max(1,a.meals|0), k=nm-1;
+  var m0=open+LEAD, hardL=close-TAIL-MINNAP, mL=close-EVENING;
+  if(k>0&&mL<m0+a.inv.minMealGap*k)mL=m0+a.inv.minMealGap*k;  // reach for legal gaps
+  if(mL>hardL)mL=hardL;                                       // but never past her bedtime
+  if(mL<m0)mL=m0;
+  /* A block needs its trip, its meal, the fifteen minutes and a nap worth the
+     name. Below that the day genuinely does not hold this many meals, and the
+     honest answer is to feed fewer and say so — not to stack them on top of
+     each other. */
+  var span=mL-m0, MINBLOCK=45, dropped=0;
+  while(k>0&&span<k*MINBLOCK){k--;dropped++;}
+  var meals=[m0];
+  if(k===1)meals.push(m0+span);
+  else if(k>1){
+    var D=Math.min(C.free,Math.max(0,(span-k*a.inv.minMealGap)/(k-1)));
+    var g=(span+D)/k;
+    for(var q=1;q<=k;q++)meals.push(Math.round(m0+(g-D)+(q-1)*g));
+    meals[k]=m0+span;                             // pin the last one exactly
   }
-  /* A wind-down block only earns its place if there is real time for one.
-     Without the floor, a pen-close 20 minutes after the last cycle produced a
-     15-minute "wind-down" wedged between the final trip and bed. */
-  var wind=null, tail=close-t, MINWIND=45;
-  if(tail>=MINWIND){wind=t;slots.push(t);
-    S.push({t:t,k:"free",lbl:"Wind-down",note:"Calm only. No wrestling, no zoomies before bed."});}
-  else if(S.length){                       // no room: drop the trailing trip, the final one covers it
-    for(var z=S.length-1;z>=0;z--){if(S[z].k==="out"&&S[z].t===t){S.splice(z,1);break;}}
-  }
 
-  /* Meals 2..N. Two safe positions per cycle: the start of free time, or 45
-     minutes in — the latter puts the "outside 15 minutes after a meal" trip
-     exactly on the scheduled trip that already ends that block. Snapping to
-     cycle starts alone quantises meals to 2.5-hour multiples and blows a
-     five-hour hole in the middle of the day, so we search both positions for
-     the most even spacing rather than taking the nearest slot each time. */
-  var meals=[open+15], want=a.meals-1;
-  if(want>0){
-    var cand=[];
-    slots.forEach(function(x){cand.push(x);cand.push(x+45);});
-    cand=cand.filter(function(x){return x>=open+15+a.inv.minMealGap&&x<=close-45;});
-    var lateOK=cand.filter(function(x){return x>=close-190;});
-    var best=null;
-    (function pick(start,acc){
-      if(acc.length===want){
-        if(lateOK.length&&acc[acc.length-1]<close-190)return;   // keep the fast down
-        var seq=[open+15].concat(acc), g=[];
-        for(var i=1;i<seq.length;i++)g.push(seq[i]-seq[i-1]);
-        var lo=Math.min.apply(null,g), hi=Math.max.apply(null,g);
-        var lastFeed=a.snack?close-45:seq[seq.length-1];
-        var fast=(open+15+1440)-lastFeed;
-        var score=(hi-lo)+(lo<a.inv.minMealGap?600:0)+Math.max(0,fast-a.inv.maxFast)*2;
-        if(!best||score<best.score||(score===best.score&&acc[acc.length-1]>best.acc[best.acc.length-1]))
-          best={score:score,acc:acc.slice()};
-        return;
-      }
-      for(var i=start;i<cand.length;i++){acc.push(cand[i]);pick(i+1,acc);acc.pop();}
-    })(0,[]);
-    if(best)meals=[open+15].concat(best.acc);
-    else{                                    // not enough blocks — space evenly and warn
-      var lastT=slots.length?slots[slots.length-1]:close-60;
-      for(var j=1;j<=want;j++)meals.push(Math.round((open+15)+((lastT-(open+15))*j/want)));
+  /* ---- one block per meal:  out · meal · wait 15 · out · free · out · nap
+     She goes into free time already empty, which is when accidents do not
+     happen. Cat sessions sit after the meal, not before it — §10's "fed,
+     emptied, not yet tired". */
+  var naps=0, wind=null, snackAt=close-TAIL;
+  for(var bi=0;bi<=k;bi++){
+    var mt=meals[bi], last=(bi===k);
+    S.push({t:mt-LEAD,k:"out",lbl:"Outside",note:bi===0?
+      "Straight out of the pen, before anything else. Carry her to the corner.":
+      "Straight out of the pen, no exceptions. Before the food, not after."});
+    S.push({t:mt,k:"meal",lbl:"Meal "+(bi+1),
+      note:last?"Last of the day. Outside 15 minutes after.":"Outside again 15 minutes after she finishes."});
+    S.push({t:mt+POST,k:"out",lbl:"Outside",
+      note:"Fifteen minutes after the meal. This is the trip the reflex does the work on — it is the highest-yield one you get."});
+
+    var after=mt+POST+C.out, end=last?snackAt:(meals[bi+1]-LEAD);
+    var fs=Math.max(after,loop);
+    var flen=(bi===0&&!last)?CAT:C.free;
+    var room=end-fs-C.out-MINNAP;
+    if(room>=MINFREE){
+      if(flen>room)flen=room;
+      S.push({t:fs,k:"free",lbl:last?"Wind-down":"Free time",cyc:fs,note:last?
+        "Calm only. No wrestling, no zoomies before bed.":
+        (bi===0?"Cat session goes here — fed, emptied, not yet tired. Short, her on a leash, cats free to leave.":
+                "Supervised, and she is already empty. Let it run longer if she is settled and you are watching.")});
+      if(last)wind=fs;
+      S.push({t:fs+flen,k:"out",lbl:"Outside",note:"Then into the pen."});
+      var ns=fs+flen+C.out;
+      if(end-ns>=MINNAP){S.push({t:ns,k:"nap",len:end-ns,lbl:"Nap",
+        note:"Until she wakes — the "+rdur(end-ns)+" is the slot, not a target. Never wake her for the schedule."});naps++;}
+    }else if(end-after>=MINNAP){
+      S.push({t:after,k:"nap",len:end-after,lbl:"Nap",note:fs>after?
+        "Fed and emptied, and back in the pen until you are free. The "+rdur(end-after)+" is the slot, not a target.":
+        "Until she wakes — the "+rdur(end-after)+" is the slot, not a target. Never wake her for the schedule."});
+      naps++;
     }
-    meals.sort(function(x,y){return x-y;});
   }
-  /* Repair pass. The search above can only pick safe slots, but the
-     fallback for a day too short to hold every meal spaces them evenly and
-     could drop one into a nap. Enforce the rule once, after either path,
-     so it cannot depend on which branch ran. */
-  var shifted=repairMeals(meals,S,C.nap,close);
-  meals.forEach(function(m,i){
-    if(i===0)return;
-    S.push({t:m,k:"meal",lbl:"Meal "+(i+1),
-      note:i===meals.length-1?"Last of the day. Outside 15 minutes after.":"Outside again 15 minutes after she finishes."});
-  });
+  // the tail has to exist before the naps can be fitted around it
+  var PEND=[];
 
-  /* The snack was pinned to close-45 with no nap check — the one rule meals
-     obey. With a late pen-close that put it inside the last nap. */
-  var snackAt=close-45;
-  if(!wind)snackAt=Math.max(snackAt,t);    // t is where the last nap ends
-  if(snackAt>close-25)snackAt=close-25;
-  if(a.snack)S.push({t:snackAt,k:"meal",lbl:"Bedtime snack",
+  /* The snack sits a fixed distance from the pen closing, and the last nap is
+     built to end there — but the rule is checked, not assumed. It was pinned
+     here once with no nap check and a later pen-close buried it mid-nap. */
+  if(a.snack)PEND.push({t:snackAt,k:"meal",lbl:"Bedtime snack",
     note:"Small — or warm goat milk. §12 keeps this; the loop spec dropped it. It is what bridges the overnight gap."});
-  S.push({t:close-15,k:"out",lbl:"Final trip outside",note:"Give her the full ten minutes. Grooming before this, not after."});
-  S.push({t:close,k:"bed",lbl:"Tray in, pen closes",note:"Her bedtime is fixed whether or not you are still up."});
+  PEND.push({t:close-15,k:"out",lbl:"Final trip outside",note:"Give her the full ten minutes. Grooming before this, not after."});
+  PEND.push({t:close,k:"bed",lbl:"Tray in, pen closes",note:"Her bedtime is fixed whether or not you are still up."});
+  PEND.forEach(function(x){S.push(x);});
   S.sort(function(x,y){return (x.t-y.t) || (RANK[x.k]-RANK[y.k]);});
 
+  /* Enforced once the whole day exists, never assumed. The blocks were built
+     from the meal times so nothing should be sitting in a nap — but if the
+     repair ever does fire, the steps have to follow the array or the two
+     disagree, and the measurements would then describe a day she isn't having. */
+  fitNaps(S,close);
+  var shifted=dropped+repairMeals(meals,S,C.nap,close);
+  if(shifted){var ms=S.filter(function(x){return x.k==="meal"&&x.lbl.indexOf("snack")<0;})
+                      .sort(function(x,y){return x.t-y.t;});
+    ms.forEach(function(st,i){if(meals[i]!==undefined)st.t=meals[i];});
+    S.sort(function(x,y){return (x.t-y.t) || (RANK[x.k]-RANK[y.k]);});}
+  var n=naps;
   /* ---- an outing or an errand displaces part of the day ----
      Two quite different cases. If she comes, the block is her free time and
      the cost is paid afterwards: novelty tires a puppy far more than it looks,
@@ -645,8 +675,9 @@ function buildDay(a){
       if(found){
         if(away.withHer)found.lbl="Nap — protect this one";
         found.note=note;
-      }else S.push({t:want,k:kind,lbl:away.withHer?"Nap — protect this one":"Free time",note:note});
+      }else S.push({t:want,k:kind,len:kind==="nap"?C.nap:undefined,lbl:away.withHer?"Nap — protect this one":"Free time",note:note});
       // meals list follows the steps so the measurements stay honest
+      fitNaps(S,close);                          // the reflow moved things under the naps
       var mealSteps=S.filter(function(x){return x.k==="meal"&&x.lbl.indexOf("snack")<0;})
                      .sort(function(x,y){return x.t-y.t;});
       meals=mealSteps.map(function(x){return x.t;});
@@ -658,7 +689,7 @@ function buildDay(a){
         if(repairMeals(pair,S,C.nap,close)){
           var want2=Math.min(pair[1],close-20), safe=want2;
           S.forEach(function(x){                 // if clamping lands back in a nap, go before it
-            if(x.k==="nap"&&want2>x.t&&want2<x.t+C.nap)safe=x.t-5;
+            if(x.k==="nap"&&want2>x.t&&want2<x.t+(x.len||C.nap))safe=x.t-5;
           });
           snk.t=safe; snackT=safe;
         }
@@ -672,7 +703,7 @@ function buildDay(a){
   var m={
     penned:(open+1440)-close,                       // pen closes, reopens next morning
     awake:close-open,
-    fast:(open+15+1440)-lastFeed,                  // last thing she eats → first meal
+    fast:(open+LEAD+1440)-lastFeed,                // last thing she eats → first meal
     settle:close-lastFeed,                          // last meal → pen closes
     cycles:n, wind:wind, meals:meals,
     gaps:meals.slice(1).map(function(x,i){return x-meals[i];}),
@@ -688,7 +719,7 @@ function buildDay(a){
   if(away&&away.withHer&&(away.e-away.s)>120)m.warn.push({k:"away",
     txt:rdur(away.e-away.s)+" out is a long trip at her age. Watch for her shutting down rather than settling, and let the nap afterwards run."});
   if(shifted)m.warn.push({k:"squeeze",txt:"The day is short for "+a.meals+" meals — "+shifted+
-    " had to be moved off a nap. Either drop a meal or start her day earlier."});
+    " had to be dropped or moved off a nap. Either feed fewer meals or start her day earlier."});
   var tight=m.gaps.filter(function(g){return g<a.inv.minMealGap;}).length;
   if(tight)m.warn.push({k:"gap",txt:tight+" meal gap"+(tight>1?"s":"")+" under "+rdur(a.inv.minMealGap)+". Regular spacing is what makes her poop predictable."});
   return {steps:S,m:m};
@@ -1409,6 +1440,7 @@ function renderDay(){
   [["Step one","Five to ten boring minutes in the yard corner. No play, no chat."],
    ["Step two","Back inside, straight into the pen for 10–20 minutes."],
    ["Step three","Try again. Repeat until she goes."],
+   ["If the next thing due is a meal","Feed her rather than running the ladder again. A meal is not free time, so the rule below is not being bent — and eating is what triggers the reflex, which makes the trip 15 minutes later a far better retry than another attempt now. Keep her contained until then: pen, crate, lap or leash."],
    ["If she falls asleep waiting","The ladder ends there. Don't wake her, don't keep trying — the next trip is when she wakes, and that is the highest-yield one of the day."],
    ["Never","Back to free time on an empty trip. That is the accident."],
    ["Straining, or nothing all day","Repeated squatting with no result, crying while trying, no urine across a long awake stretch, or no stool in a day — that is a vet call, not a schedule problem."]].forEach(function(x){

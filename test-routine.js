@@ -59,7 +59,7 @@ const check = (name, ok, detail) => {
         try { r = buildDay(A); }
         catch (e) { fails.push([A.dayStart, A.penClose, 'threw: ' + e.message]); continue; }
         const naps = r.steps.filter(s => s.k === 'nap')
-                            .map(s => [s.t, s.t + A.cycle.nap]).sort((a, b) => a[0] - b[0]);
+                            .map(s => [s.t, s.t + (s.len || A.cycle.nap)]).sort((a, b) => a[0] - b[0]);
         r.steps.filter(s => s.k === 'meal').forEach(s => {
           if (naps.some(([a, z]) => s.t > a && s.t < z))
             fails.push([A.dayStart, A.penClose, s.lbl + ' inside a nap']);
@@ -76,6 +76,25 @@ const check = (name, ok, detail) => {
         for (let i = 1; i < outs.length; i++)
           if (outs[i] - outs[i - 1] < 10)
             fails.push([A.dayStart, A.penClose, 'two trips ' + (outs[i] - outs[i - 1]) + ' min apart']);
+        /* The meal opens its block; free time comes after it, never before.
+           The old order was free-time-first, so this is the assertion that
+           would have passed while describing the wrong day. */
+        const ms = r.steps.filter(s => s.k === 'meal' && s.lbl.indexOf('snack') < 0).map(s => s.t);
+        const fr = r.steps.filter(s => s.k === 'free').map(s => s.t);
+        if (fr.length && ms.length && fr[0] < ms[0])
+          fails.push([A.dayStart, A.penClose, 'free time before the first meal']);
+        fr.forEach(f => {
+          const prior = ms.filter(t => t <= f);
+          if (!prior.length) { fails.push([A.dayStart, A.penClose, 'free block with no meal before it']); return; }
+          const d = f - prior[prior.length - 1];
+          if (d > 45) fails.push([A.dayStart, A.penClose, 'free block ' + d + ' min after its meal, not hanging off it']);
+        });
+        ms.forEach(t => {
+          if (!r.steps.some(s => s.k === 'out' && t - s.t > 0 && t - s.t <= 15))
+            fails.push([A.dayStart, A.penClose, 'meal at ' + t + ' is not opened by a trip']);
+          if (!r.steps.some(s => s.k === 'out' && s.t === t + 15))
+            fails.push([A.dayStart, A.penClose, 'meal at ' + t + ' has no trip 15 min after it']);
+        });
       }
     }
     return { n, fails: fails.slice(0, 8), total: fails.length };
@@ -95,7 +114,7 @@ const check = (name, ok, detail) => {
       A.out = { on: true, start: (h < 10 ? '0' : '') + h + ':00', mins, withHer };
       n++;
       let r; try { r = buildDay(A); } catch (e) { fails.push([withHer, h, mins, 'threw: ' + e.message]); continue; }
-      const naps = r.steps.filter(s => s.k === 'nap').map(s => [s.t, s.t + A.cycle.nap]).sort((a, b) => a[0] - b[0]);
+      const naps = r.steps.filter(s => s.k === 'nap').map(s => [s.t, s.t + (s.len || A.cycle.nap)]).sort((a, b) => a[0] - b[0]);
       r.steps.filter(s => s.k === 'meal').forEach(s => {
         if (naps.some(([a, z]) => s.t > a && s.t < z)) fails.push([withHer, h, mins, s.lbl + ' inside a nap']);
       });
